@@ -5,7 +5,7 @@ const nativeObserver = new PerformanceObserver((v) => {
   const entries = v.getEntries();
   console.log(entries);
   entries.forEach((entry) => {
-    const rects = entry?.damagedRects;
+    const rects = entry?.recentlyDamagedRects;
     ContainerPerformanceObserver.paintDebugOverlay(rects);
   });
 });

@@ -1,7 +1,7 @@
 const observer = new PerformanceObserver((list) => {
   list.getEntries().forEach((entry) => {
     console.log(entry);
-    const rects = entry.damagedRects;
+    const rects = entry.recentlyDamagedRects;
     ContainerPerformanceObserver.paintDebugOverlay(rects);
   });
 });
