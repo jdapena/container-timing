@@ -214,7 +214,7 @@ function teardownWidget(widget) {
 }
 ```
 
-Detaching the element is fine: a detached root keeps answering for as long as script holds a reference.
+The order matters: once the element is disconnected, whether by its own removal or an ancestor's, the recording is gone and `getContainerTimingInfo()` returns null.
 
 Removing the `containertiming` attribute or changing its identifier is not: that ends the root's history and `getContainerTimingInfo()` returns null. See [A container root's history ends when it stops being a container root](#a-container-roots-history-ends-when-it-stops-being-a-container-root).
 
@@ -325,9 +325,9 @@ This is presented as a consequence worth documenting, not as a contract this pro
 
 `ContainerTimingInfo.size` and `.intersectionRect` are measured as of the last presented frame rather than as of the last emitted entry, so they keep advancing while emission is throttled.
 
-### A container root's history ends when it stops being a container root
+### A container root's history ends when it stops being a connected container root
 
-What is being accumulated is the history of **a container root under a given identifier**, and it ends when either half of that stops holding. Precisely:
+What is being accumulated is the history of **a connected container root under a given identifier**, and it ends when any part of that stops holding. Precisely:
 
 | Event | Effect on the history |
 |---|---|
@@ -336,12 +336,19 @@ What is being accumulated is the history of **a container root under a given ide
 | `containertiming` set to the **same** identifier | No effect; the history continues. |
 | Identifier changed away and later **changed back** | The original history ended at the first change and does not come back. The second change starts a third history, empty until something paints. |
 | `containertimingignore` toggled | No effect on the history; it changes propagation to ancestors. |
-| Element removed from the document | No effect. A detached root keeps answering for as long as script holds a reference to it. |
-| Element becomes unreachable from script | The record is collected with it. |
+| Element becomes disconnected, by its own removal or an ancestor's | Ends. The record is dropped and `getContainerTimingInfo()` returns null. |
+| A disconnected element is inserted again | A new history starts, empty until something paints. |
+| Element adopted into another document | Ends, for the same reason: the recording belongs to the document it happened in. |
 
-The round-trip case is the one worth spelling out because "cumulative over the container's lifetime" invites the opposite reading. There is no memory of a retired identifier: a container root's history is not resurrectable, and an author who toggles the attribute to pause reporting will find the numbers gone rather than paused.
+The identifier round-trip is worth spelling out because "cumulative over the container's lifetime" invites the opposite reading. There is no memory of a retired identifier: a container root's history is not resurrectable, and an author who toggles the attribute to pause reporting will find the numbers gone rather than paused.
 
-All of this is already today's behaviour for the entry stream (changing or removing the attribute already drops the container's record), but with a pull API it becomes directly observable, so it has to be specified rather than left as an implementation detail. The corollary for authors: query final numbers **before** teardown, and treat the attribute as write-once.
+The rule is written in terms of **connectedness, not removal**, because removal is only one way to stop being connected and not the most common one. A widget wrapper is torn out and every marked root inside it is disconnected without being touched. `isConnected` covers that, along with a root that was never inserted and one sitting in a `DocumentFragment`.
+
+Dropping the recording at that point is a choice, and the alternative was to keep answering from a detached element for as long as script holds it, which is what the current implementation happens to do, since nothing erases a record on removal. It is not the better rule. The recording belongs to the document where the painting happened, an element outside the tree has no painted region on screen any more, and keeping it alive creates a second, quieter lifetime that has to be specified on top of the attribute one. It also matches what the paint pipeline does underneath: re-inserted content is laid out afresh and reported again, so continuing the old recording would be mixing two of them.
+
+The corollary for authors is the important part, and it is now a requirement rather than advice: **query the final numbers before the container leaves the document**, and treat the attribute as write-once.
+
+Two notes for implementers. This is a behaviour change rather than a description of what ships today, and it needs a removal hook that Container Timing currently does not have. Whether the record is dropped eagerly when the element is disconnected or lazily when it is next asked for is not observable, apart from memory, so either is fine.
 
 ### `size` becomes `unsigned long long`
 
@@ -448,7 +455,7 @@ An earlier draft routed the `firstRenderTime` replacement through the aggregate 
 
 **Restrict candidates to the elements that grow the painted region**, so that an entry only ever nominates content which contributed to it. Rejected: one rule has to cover both accumulation windows, or the lifetime largest stops being the maximum of the per-entry ones. Besides, content reaches Container Timing only once, so the guard is not needed.
 
-**An aggregate accessor on the entry**, `PerformanceContainerTiming.getContainerTimingInfo()`, mirroring the one on `Element`. Proposed in an earlier draft and now rejected. A `PerformanceEntry` is frozen at creation, so a method on it that answers about the container's state now reads as a snapshot and is not one, and no amount of prose fixes a shape that has to be explained twice. It was load-bearing for one case, a late observer wanting final numbers for a root that has since been detached and that it holds no reference to. That case is now partly covered, since every entry carries `firstContentfulPaint` and a `largestNewContentfulPaint` with a real `size`, so an observer can fold what it received; what remains uncovered is state from before it was listening, and that is accepted.
+**An aggregate accessor on the entry**, `PerformanceContainerTiming.getContainerTimingInfo()`, mirroring the one on `Element`. Proposed in an earlier draft and now rejected. A `PerformanceEntry` is frozen at creation, so a method on it that answers about the container's state now reads as a snapshot and is not one, and no amount of prose fixes a shape that has to be explained twice. It was load-bearing for one case, a late observer wanting final numbers for a root that has since been detached and that it holds no reference to, and that case no longer exists: a disconnected root has no recording to hand out, whichever surface is asking. That case is now partly covered, since every entry carries `firstContentfulPaint` and a `largestNewContentfulPaint` with a real `size`, so an observer can fold what it received; what remains uncovered is state from before it was listening, and that is accepted.
 
 **Keeping `firstRenderTime` and adding nothing**, rather than replacing it with `firstContentfulPaint` on the entry. Rejected: a presentation-time-only scalar cannot express the `paintTime` and `presentationTime` split, and it cannot be extended later without another attribute beside it.
 
