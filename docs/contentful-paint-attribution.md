@@ -2,7 +2,7 @@
 
 **Author:** Jose Dapena Paz (Igalia) &lt;jdapena@igalia.com&gt;
 
-**Last updated:** 2026-09-16
+**Last updated:** 2026-09-17
 
 **Status:** Proposal for discussion.
 
@@ -33,7 +33,7 @@
 
 ## Introduction
 
-The starting point was for this explainer was: align Container Timing's attribution with the shape ICP converged on. ICP attributes contentful paints to a scope by nesting a whole `LargestContentfulPaint` in the attributing entry; Container Timing does something similar with `lastPaintedElement`, an `Element?` that carries no size, no URL, no load time and no render time of its own. Adopting ICP's shape is mostly mechanical, and the paint feed already carries every field the nested object needs.
+The starting point for this explainer was to align Container Timing's attribution with the shape ICP converged on. ICP attributes contentful paints to a scope by nesting a whole `LargestContentfulPaint` in the attributing entry; Container Timing does something similar with `lastPaintedElement`, an `Element?` that carries no size, no URL, no load time and no render time of its own. Adopting ICP's shape is mostly mechanical, and the paint feed already carries every field the nested object needs.
 
 Working through it surfaced two things that are not mechanical, so this document will also cover those.
 
@@ -73,9 +73,9 @@ Where this document says an attribute is kept for compatibility, read it as comp
 ## Non-goals
 
 - **Changing `startTime` / `duration` anchoring.** ICP anchors `startTime` to the interaction that caused the paint. Out of scope, and for a reason that outlives the trial: under ICP's convention `startTime` would become constant per container root, which reorders `getEntriesByType()` results by container instead of chronologically. The compatibility argument is the weaker of the two and is the one that expires.
-- **Adopting LCP's candidate eligibility rules.** Container Timing deliberately reports paints LCP declines to treat as candidates. See [Container Timing's contentful set is not LCP's](#container-timings-contentful-set-is-not-lcps).
+- **Adopting LCP's candidate eligibility rules.** Container Timing deliberately reports paints LCP declines to treat as candidates. See [Container Timing's contentful set is its own](#container-timings-contentful-set-is-its-own-and-should-be-stated-as-such).
 - **Removing the deprecated attributes, if any part of this lands during the trial.** Once it closes, removal moves back on the table and is the preferred end state.
-- **Deciding when recording stops.** Container Timing records for the document's lifetime today and this document does not change that, but the question deserves its own discussion rather than a decision buried in a proposal about attributes. Both sides are real: stopping bounds the memory and per-paint cost described in [What maintaining the aggregate costs](#what-maintaining-the-aggregate-costs), while continuing is what developers already depend on, since containers legitimately keep updating and people use the entries that arrive after input or scroll. One shape worth exploring is to stop under LCP's conditions but let containers added after a stop record until the next one, which scopes recording per interaction the way ICP does rather than stopping once and permanently the way LCP does. Whatever is chosen has to say what becomes of the aggregate: with a stop condition, `largestContentfulPaint` and `size` accumulate over a recording window rather than over the container's whole life, and `getContainerTimingInfo()` should keep answering with a frozen view rather than going null, which is what a teardown beacon wants in any case.
+- **Deciding when recording stops.** Container Timing records for the document's lifetime today and this document does not change that, but the question deserves its own discussion rather than a decision buried in a proposal about attributes. Both sides are real: stopping bounds the memory and per-paint cost described in [What maintaining the aggregate costs](#what-maintaining-the-aggregate-costs), while continuing is what developers already depend on, since containers legitimately keep updating and people use the entries that arrive after input or scroll. One shape worth exploring is to stop under LCP's conditions but let containers added after a stop record until the next one, which scopes recording per interaction the way ICP does rather than stopping once and permanently the way LCP does. Whatever is chosen has to say what becomes of the aggregate: with a stop condition, `largestContentfulPaint` and `size` accumulate over a recording window rather than over the container's whole life, and `getContainerTimingInfo()` should keep answering with a frozen view rather than going null, since a container that has stopped recording is still in the document and still has numbers worth reading.
 - **Clearing or resizing the entry buffer.** Moot if [Decision 1](#decisions-to-take) drops the buffer, and a separate question if it stays. A long lived page eventually fills it and loses everything after that, and the platform's only precedent for handling this is Resource Timing, which has both `clearResourceTimings()` and `setResourceTimingBufferSize()`. Element Timing has neither, and Container Timing follows Element Timing today. Whether container entries deserve the Resource Timing treatment is a question about buffer management rather than about attribution, so it is left out. Note the aggregate is unaffected either way, since it is not held in the buffer and cannot age out of it.
 - **Exposing a list of everything newly painted**, LoAF-`scripts`-style. A container filling with hundreds of images in one frame would carry hundreds of sub-entries.
 - **Unifying with ICP's aggregate shape.** A shared `ContentfulPaintAggregate` mixin is discussed in [Considered alternatives](#considered-alternatives) as future work, not as part of this change.
@@ -168,7 +168,7 @@ partial interface Element {
 
 ### Four things to notice
 
-**The nested objects are never queued**, as in ICP and LoAF. Their `entryType` and `name` are the ordinary ones for their interface (`"largest-contentful-paint"`, and `"paint"` named `"first-contentful-paint"`, or `"last-paint"` for `lastPaint` if it survives [Decision 4](#decisions-to-take)) and `toJSON()` behaves normally. No spec currently says an instance may exist unqueued, so that needs naming somewhere. See see [Semantics that need explicit spec text](#semantics-that-need-explicit-spec-text).
+**The nested objects are never queued**, as in ICP and LoAF. Their `entryType` and `name` are the ordinary ones for their interface (`"largest-contentful-paint"`, and `"paint"` named `"first-contentful-paint"`, or `"last-paint"` for `lastPaint` if it survives [Decision 4](#decisions-to-take)) and `toJSON()` behaves normally. No spec currently says an instance may exist unqueued, so that needs naming somewhere. See [Semantics that need explicit spec text](#semantics-that-need-explicit-spec-text).
 
 **`getContainerTimingInfo()` is a live query, and it lives only on `Element`.** It returns the root's state at the moment of the call, which is the point of it. An earlier draft put the same method on the entry as well; that is [rejected](#considered-alternatives), because a `PerformanceEntry` is otherwise frozen at creation and a method on it answering about now invites exactly the wrong reading. It never throws: a non-root element, a retired root, and a root that has painted nothing all return null.
 
@@ -278,7 +278,7 @@ The aggregate's whole value is being independent of the entry stream:
 
 There is a fourth hole today, a contentful paint landing entirely inside the already-painted region, which queues no entry because the container did not grow. [Decision 2](#decisions-to-take) would close that one at the trigger. The three above survive it.
 
-A pull API has neither problem, and it lets script ask at teardown time rather than keeping an observer alive.
+None of those three is fixable by adding attributes to the entry, and a pull API has none of them, as long as it is asked while the container is still in the document.
 
 One implementation consequence, worth carrying into any engine: **recording must not be gated on whether an entry can be queued.** Chromium's text path used to consult "can I report to container timing?", which is false once the buffer is full with nobody observing, so text paints stopped reaching the aggregate while image paints kept arriving. With a pull API that becomes web-visible.
 
@@ -374,7 +374,7 @@ Caching and ceilings are mitigations. The structural question is when recording 
 
 ## Semantics that need explicit spec text
 
-These are the contract, not afterthoughts. Each is behaviour the design above depends on, currently either unstated or stated only in a spec that consumes it rather than defines it. Three of the six are about rules Container Timing *inherits*, which is exactly where "obviously it works like LCP" would produce a wrong implementation.
+These are the contract, not afterthoughts. Each is behaviour the design above depends on, currently either unstated or stated only in a spec that consumes it rather than defines it. Several of them are about rules Container Timing *inherits*, which is exactly where "obviously it works like LCP" would produce a wrong implementation.
 
 1. **Container Timing's candidate set is not LCP's**, and the nested attributes' non-nullability depends on that.
 2. **Container Timing does not stop recording today**, not at first input and not at first scroll, so as things stand it is specified alongside Element Timing rather than alongside LCP. What needs writing down is that this is a choice and which one it is, because "same as LCP" is not a usable shorthand here: LCP stops at the first input, permanently; ICP stops per soft navigation context; Element Timing never stops. If the discussion under [when recording stops](#non-goals) lands on a stop condition, this is the text that changes, together with the wording that calls the aggregate cumulative over the container's lifetime.
@@ -438,9 +438,7 @@ new PerformanceObserver(list => {
 }).observe({type: 'container', buffered: true});
 ```
 
-`lastPaintedElement` is now derived from `largestNewContentfulPaint.element`, so the two cannot disagree during the deprecation window, and that migration is a pure rename.
-
-Both migrations are now a rename in place. `lastPaintedElement` becomes `largestNewContentfulPaint.element`, which is derived from it during the deprecation window so the two cannot disagree, and `firstRenderTime` becomes `firstContentfulPaint.startTime`, on the same object the reader already has.
+Both migrations are a rename in place. `lastPaintedElement` becomes `largestNewContentfulPaint.element`, which is derived from it during the deprecation window so the two cannot disagree, and `firstRenderTime` becomes `firstContentfulPaint.startTime`, on the same object the reader already has.
 
 An earlier draft routed the `firstRenderTime` replacement through the aggregate view, which made it a method call, an optional chain and a property walk, and left it returning null for a root that had stopped being a container root, the one case where the old scalar still worked. Putting the first contentful paint on the entry removes all of that. It is also the one piece of aggregate state that can live on a frozen record without contradiction, because it never changes after the container's first paint: everything that moves stays on the pull API.
 
@@ -522,7 +520,7 @@ The trade-off is between an entry that explains itself and an entry surface that
 
 *Lean: drop it.* What it costs is out of proportion to what it answers, and dropping it removes a whole class of open question rather than settling one.
 
-`firstContentfulPaint` reports `"first-contentful-paint"`, a name Paint Timing already enumerates, so `lastPaint` is the only member of this proposal that asks another specification for a new one. Removing it removes that ask entirely, and with it the fallbacks (an empty `name`, or folding the last paint into `PaintTimingMixin` on `ContainerTimingInfo` itself). It also removes an ambiguity that [Decision 2](#decisions-to-take) would otherwise create: once entries can be queued by a growing largest as well as by a growing region, "last paint" has two defensible meanings, the last paint that grew the region and the last paint that produced an entry, and neither is obviously the one a caller wants. What remains is `{firstPaint, largestContentfulPaint, size, intersectionRect}`, which is also a cleaner fit for the shared aggregate mixin sketched under future considerations.
+`firstContentfulPaint` reports `"first-contentful-paint"`, a name Paint Timing already enumerates, so `lastPaint` is the only member of this proposal that asks another specification for a new one. Removing it removes that ask entirely, and with it the fallbacks (an empty `name`, or folding the last paint into `PaintTimingMixin` on `ContainerTimingInfo` itself). It also removes an ambiguity that [Decision 2](#decisions-to-take) would otherwise create: once entries can be queued by a growing largest as well as by a growing region, "last paint" has two defensible meanings, the last paint that grew the region and the last paint that produced an entry, and neither is obviously the one a caller wants. What remains is `{firstContentfulPaint, largestContentfulPaint, size, intersectionRect}`, which is also a cleaner fit for the shared aggregate mixin sketched under future considerations.
 
 The cost is real but conditional on [Decision 1](#decisions-to-take). If `container` entries keep their timeline buffer, "when did this container last change" is answerable from the last entry's `startTime`, and `lastPaint` is a convenience for a question the entry stream already answers. If entries become observer-only, the aggregate is the only route to that question for a caller that was not listening, and `lastPaint` should stay. The two decisions should therefore be taken together, and in the order 1 then 4.
 
