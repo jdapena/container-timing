@@ -92,7 +92,7 @@ Three problems, all consequences of putting everything on a per-update entry:
 
 - **Attributing a slow widget:** which element dominates it and when it rendered, and for an image, which resource backed it and when that resource loaded, without correlating against Resource Timing by hand. Text candidates carry no resource, following LCP's convention of an empty `url` and a zero `loadTime`, so the resource half of the answer exists only where there is a resource to name.
 - **Comparing a container against page LCP or against an interaction's ICP:** requires the same `size` definition and a cumulative, not per-update, largest.
-- **Reading final numbers at teardown**, from an SPA that tore the widget out, with no observer alive for the widget's lifetime.
+- **Reading final numbers as a widget is torn down**, from an SPA that kept no observer alive for the widget's lifetime, querying while the container is still in the document.
 - **Content that fills already-painted space:** an image landing over its own placeholder is the widget's real content and today produces no entry and no attribution.
 
 ## Proposed API
@@ -215,9 +215,7 @@ function teardownWidget(widget) {
 }
 ```
 
-The order matters: once the element is disconnected, whether by its own removal or an ancestor's, the recording is gone and `getContainerTimingInfo()` returns null.
-
-Removing the `containertiming` attribute or changing its identifier is not: that ends the root's history and `getContainerTimingInfo()` returns null. See [A container root's history ends when it stops being a container root](#a-container-roots-history-ends-when-it-stops-being-a-container-root).
+The order matters. Once the element is disconnected, by its own removal or an ancestor's, the recording is gone and `getContainerTimingInfo()` returns null. Removing the `containertiming` attribute or changing its identifier ends it in the same way, so a widget that is retagged before being removed has already lost its numbers. See [a container root's history ends when it stops being a connected container root](#a-container-roots-history-ends-when-it-stops-being-a-connected-container-root).
 
 An observer that does not hold the element is not left empty handed. Each entry carries `firstContentfulPaint` and a `largestNewContentfulPaint` with a real `size`, so folding the stream recovers the largest over the paints it saw. What it cannot recover is the state of a root it never observed, which is the trade accepted when the aggregate accessor was taken off the entry.
 
@@ -380,7 +378,7 @@ These are the contract, not afterthoughts. Each is behaviour the design above de
 
 1. **Container Timing's candidate set is not LCP's**, and the nested attributes' non-nullability depends on that.
 2. **Container Timing does not stop recording today**, not at first input and not at first scroll, so as things stand it is specified alongside Element Timing rather than alongside LCP. What needs writing down is that this is a choice and which one it is, because "same as LCP" is not a usable shorthand here: LCP stops at the first input, permanently; ICP stops per soft navigation context; Element Timing never stops. If the discussion under [when recording stops](#non-goals) lands on a stop condition, this is the text that changes, together with the wording that calls the aggregate cumulative over the container's lifetime.
-3. **"Lifetime" means the container root's record lifetime**, which ends when the `containertiming` attribute is removed or its identifier changes.
+3. **"Lifetime" means the container root's record lifetime**, which ends when the element is disconnected from the document, when the `containertiming` attribute is removed, or when its identifier changes. The disconnection half is the part implementations are most likely to get wrong by omission, since it needs a removal hook rather than an attribute one.
 4. **The once-only rule.** Today it is an emergent property of two Paint Timing internal data structures (a persistent "set of elements with rendered text" and a consume-once "images pending rendering" list), and the only prose asserting it as a *guarantee* lives in the LCP spec, which consumes the rule rather than implementing it. Container Timing now depends on it for its selection rule, so it should be stated somewhere Container Timing can cite.
 5. **Nested entries exist without being queued.** `LargestContentfulPaint` and `PerformancePaintTiming` instances reachable only through these attributes are never added to the performance timeline, never delivered to an observer, and never returned by `getEntries()`. ICP and LoAF already rely on this, but neither the LCP nor the Paint Timing spec currently says an instance may exist unqueued, so the construction should be named ("synthetic" or "unqueued" entries) in whichever spec is the right home, and Container Timing should cite it rather than re-describe it.
 6. **`size` is allowed to be approximate.** Keeping the painted region exact means paying for every distinct rectangle for as long as the container records, which is the cost described under [What maintaining the aggregate costs](#what-maintaining-the-aggregate-costs). The spec should permit bounded precision rather than leave implementations to choose between conformance and a ceiling: an implementation may simplify the region it tracks, merging rectangles into stripes or collapsing to the bounding box past some complexity, provided the error runs one way. `size` may over-report the painted area, never under-report it, and it stays monotonically non-decreasing. Two things should be required to stay exact, and they are what makes the latitude cheap. `intersectionRect` is the region's bounds, and every simplification worth making adds area inside those bounds, so they need not move and the spec should say they do not. Attribution is untouched, because `largestNewContentfulPaint` and `largestContentfulPaint` are selected and sized by each element's own clipped area rather than by the region, so a coarser region costs accuracy in one number and changes nothing about which element is reported. The spec should not prescribe a simplification or a numeric bound; that is a quality of implementation matter.
@@ -532,7 +530,9 @@ Note what is not affected either way: the first contentful paint stays, on the e
 
 ### 5. Should a retired container root keep answering?
 
-*Lean: no, current behaviour.* A root that lost its `containertiming` attribute or changed identifier returns null. Keeping a retired record alive raises questions with no good answer: for how long, keyed on what, and what happens when the identifier is reused elsewhere. Full table, including the change-back case, in [A container root's history ends when it stops being a container root](#a-container-roots-history-ends-when-it-stops-being-a-container-root).
+*Lean: no.* A root that lost its `containertiming` attribute, changed identifier, or left the document returns null. Keeping a retired record alive raises questions with no good answer: for how long, keyed on what, and what happens when the identifier is reused elsewhere.
+
+Two of those three are how implementations already behave, since changing or removing the attribute drops the record. The third, disconnection, is a change: nothing erases a record on removal today, so a detached root keeps answering for as long as script holds it. Treating all three the same way is the point of the lean, and the full table, including the identifier round trip, is in [a container root's history ends when it stops being a connected container root](#a-container-roots-history-ends-when-it-stops-being-a-connected-container-root).
 
 ### 6. Should object identity across calls be normative?
 
