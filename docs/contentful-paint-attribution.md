@@ -47,7 +47,7 @@ The entry buffer is a second case: it is capped, so on a busy page the entries c
 
 #### So the division of labour should be explicit
 
-The timeline carries *updates* (what changed, when, and what content drove it). Accumulated state is reached by *asking* ( `Element.getContainerTimingInfo()`) with no observer required and no dependence on buffering.
+The timeline carries _updates_ (what changed, when, and what content drove it). Accumulated state is reached by _asking_ ( `Element.getContainerTimingInfo()`) with no observer required and no dependence on buffering.
 
 Every attribute below follows from that split, and it is also the framing under which [Decision 1](#decisions-to-take) (do `container` entries still need a timeline buffer at all?) becomes answerable.
 
@@ -155,14 +155,14 @@ partial interface Element {
 
 ### Which API surface answers what
 
-| To answer... | Use |
-|---|---|
-| What content grew this container just now? | `entry.largestNewContentfulPaint` |
-| How big is the container now, and where? | `entry.size` / `entry.intersectionRect` (as of this entry), or `info.size` / `info.intersectionRect` (as of the last presented frame) |
-| What is this container's hero content, overall? | `info.largestContentfulPaint` |
-| When did this container first render content, and with what? | `entry.firstContentfulPaint`, or `info.firstContentfulPaint` |
-| When did it last grow? | `info.lastPaint` |
-| Any of the above, with no observer attached | `element.getContainerTimingInfo()` |
+| To answer...                                                 | Use                                                                                                                                   |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| What content grew this container just now?                   | `entry.largestNewContentfulPaint`                                                                                                     |
+| How big is the container now, and where?                     | `entry.size` / `entry.intersectionRect` (as of this entry), or `info.size` / `info.intersectionRect` (as of the last presented frame) |
+| What is this container's hero content, overall?              | `info.largestContentfulPaint`                                                                                                         |
+| When did this container first render content, and with what? | `entry.firstContentfulPaint`, or `info.firstContentfulPaint`                                                                          |
+| When did it last grow?                                       | `info.lastPaint`                                                                                                                      |
+| Any of the above, with no observer attached                  | `element.getContainerTimingInfo()`                                                                                                    |
 
 ...where `info` is `element.getContainerTimingInfo()`.
 
@@ -183,15 +183,17 @@ partial interface Element {
 The stream, which is what the timeline is for:
 
 ```js
-new PerformanceObserver(list => {
+new PerformanceObserver((list) => {
   for (const entry of list.getEntries()) {
-    const paint = entry.largestNewContentfulPaint;   // never null
-    log(`${entry.identifier} grew to ${entry.size} pixels; ` +
+    const paint = entry.largestNewContentfulPaint; // never null
+    log(
+      `${entry.identifier} grew to ${entry.size} pixels; ` +
         `driven by <${paint.element?.localName}> ${paint.size} pixels, ` +
-        `url=${paint.url || '(text)'}, loaded=${paint.loadTime}, ` +
-        `rendered=${paint.renderTime}`);
+        `url=${paint.url || "(text)"}, loaded=${paint.loadTime}, ` +
+        `rendered=${paint.renderTime}`,
+    );
   }
-}).observe({type: 'container', buffered: true});
+}).observe({ type: "container", buffered: true });
 ```
 
 #### The accumulated state
@@ -200,10 +202,10 @@ This way we can implement, using the pull API, cases as this in teardown:
 
 ```js
 function teardownWidget(widget) {
-  const info = widget.getContainerTimingInfo();   // query *before* removing
+  const info = widget.getContainerTimingInfo(); // query *before* removing
   if (info) {
     beacon({
-      id: widget.getAttribute('containertiming'),
+      id: widget.getAttribute("containertiming"),
       firstPaint: info.firstContentfulPaint.startTime,
       lastPaint: info.lastPaint.startTime,
       hero: info.largestContentfulPaint.element?.id,
@@ -223,14 +225,14 @@ An observer that does not hold the element is not left empty handed. Each entry 
 
 ### Two maxima, because the entry and the aggregate answer different questions
 
-| | `entry.largestNewContentfulPaint` | `info.largestContentfulPaint` |
-|---|---|---|
-| Window | Since this container's previous entry | The container root's whole lifetime |
-| Reset | On every emission | Never |
-| Where | On the entry | On `ContainerTimingInfo` |
-| Nullability | Non-nullable | Non-nullable (the containing `ContainerTimingInfo` is nullable) |
+|             | `entry.largestNewContentfulPaint`     | `info.largestContentfulPaint`                                   |
+| ----------- | ------------------------------------- | --------------------------------------------------------------- |
+| Window      | Since this container's previous entry | The container root's whole lifetime                             |
+| Reset       | On every emission                     | Never                                                           |
+| Where       | On the entry                          | On `ContainerTimingInfo`                                        |
+| Nullability | Non-nullable                          | Non-nullable (the containing `ContainerTimingInfo` is nullable) |
 
-A Container Timing entry fires on *aggregate area growth*, which is neither of these. Without the cumulative one you cannot identify a container's hero content; without the per-update one you cannot tell what changed. Because both use the same selection rule and differ only in the reset, the lifetime maximum is exactly the maximum of the per-entry ones.
+A Container Timing entry fires on _aggregate area growth_, which is neither of these. Without the cumulative one you cannot identify a container's hero content; without the per-update one you cannot tell what changed. Because both use the same selection rule and differ only in the reset, the lifetime maximum is exactly the maximum of the per-entry ones.
 
 **On naming:** `lastContentfulPaint` is the obvious alternative for the per-update attribute and is not proposed. `last*` says "most recent", and the attribute names the largest, not the most recent. The distinction is the whole point of the change: `lastPaintedElement` named whichever element happened to paint last, which is an artifact of the order paints are processed in rather than an answer to what drove the update, and a name beginning with `last` invites that reading straight back in. Giving both attributes the same name in their two places was also rejected: two identically named attributes with different accumulation windows would make this API hard to read.
 
@@ -240,7 +242,7 @@ Neither uses "the area this element newly contributed to the container". Both us
 
 This matters for three reasons:
 
-1. **Paint order stops mattering.** Selecting by contributed area hands the overlap between two elements to whichever happened to paint first, both within a frame and    across loads of the same page.
+1. **Paint order stops mattering.** Selecting by contributed area hands the overlap between two elements to whichever happened to paint first, both within a frame and across loads of the same page.
 2. **The values become comparable** with each other, and with LCP and ICP entries.
 3. **The double-counting caveat retires.** Under contributed-area accounting, two elements overlapping within one frame are each credited the shared area, so credited areas can sum to more than the container's genuinely new area.
 
@@ -302,7 +304,7 @@ This holds because Container Timing defines its own contentful set; see below.
 
 ### Container Timing's contentful set is its own, and should be stated as such
 
-Reusing the `LargestContentfulPaint` *interface* will be read as importing LCP's *behaviour*. It does not, and the specification should say positively what the set is rather than leave it to be inferred from the interface: **the content Container Timing records is the content Element Timing records**, because both are driven by the same paint feed. That is a constraint worth writing down rather than an implementation detail, since if the two sets diverged, an image annotated with `elementtiming` inside a marked container could report to one and not the other.
+Reusing the `LargestContentfulPaint` _interface_ will be read as importing LCP's _behaviour_. It does not, and the specification should say positively what the set is rather than leave it to be inferred from the interface: **the content Container Timing records is the content Element Timing records**, because both are driven by the same paint feed. That is a constraint worth writing down rather than an implementation detail, since if the two sets diverged, an image annotated with `elementtiming` inside a marked container could report to one and not the other.
 
 That places Container Timing between the two metrics it is most likely to be compared against.
 
@@ -328,16 +330,16 @@ This is presented as a consequence worth documenting, not as a contract this pro
 
 What is being accumulated is the history of **a connected container root under a given identifier**, and it ends when any part of that stops holding. Precisely:
 
-| Event | Effect on the history |
-|---|---|
-| `containertiming` attribute removed | Ends. `getContainerTimingInfo()` returns null. |
-| `containertiming` set to a **different** identifier | Ends. A fresh history starts under the new identifier. |
-| `containertiming` set to the **same** identifier | No effect; the history continues. |
-| Identifier changed away and later **changed back** | The original history ended at the first change and does not come back. The second change starts a third history, empty until something paints. |
-| `containertimingignore` toggled | No effect on the history; it changes propagation to ancestors. |
-| Element becomes disconnected, by its own removal or an ancestor's | Ends. The record is dropped and `getContainerTimingInfo()` returns null. |
-| A disconnected element is inserted again | A new history starts, empty until something paints. |
-| Element adopted into another document | Ends, for the same reason: the recording belongs to the document it happened in. |
+| Event                                                             | Effect on the history                                                                                                                          |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `containertiming` attribute removed                               | Ends. `getContainerTimingInfo()` returns null.                                                                                                 |
+| `containertiming` set to a **different** identifier               | Ends. A fresh history starts under the new identifier.                                                                                         |
+| `containertiming` set to the **same** identifier                  | No effect; the history continues.                                                                                                              |
+| Identifier changed away and later **changed back**                | The original history ended at the first change and does not come back. The second change starts a third history, empty until something paints. |
+| `containertimingignore` toggled                                   | No effect on the history; it changes propagation to ancestors.                                                                                 |
+| Element becomes disconnected, by its own removal or an ancestor's | Ends. The record is dropped and `getContainerTimingInfo()` returns null.                                                                       |
+| A disconnected element is inserted again                          | A new history starts, empty until something paints.                                                                                            |
+| Element adopted into another document                             | Ends, for the same reason: the recording belongs to the document it happened in.                                                               |
 
 The identifier round-trip is worth spelling out because "cumulative over the container's lifetime" invites the opposite reading. There is no memory of a retired identifier: a container root's history is not resurrectable, and an author who toggles the attribute to pause reporting will find the numbers gone rather than paused.
 
@@ -374,12 +376,12 @@ Caching and ceilings are mitigations. The structural question is when recording 
 
 ## Semantics that need explicit spec text
 
-These are the contract, not afterthoughts. Each is behaviour the design above depends on, currently either unstated or stated only in a spec that consumes it rather than defines it. Several of them are about rules Container Timing *inherits*, which is exactly where "obviously it works like LCP" would produce a wrong implementation.
+These are the contract, not afterthoughts. Each is behaviour the design above depends on, currently either unstated or stated only in a spec that consumes it rather than defines it. Several of them are about rules Container Timing _inherits_, which is exactly where "obviously it works like LCP" would produce a wrong implementation.
 
 1. **Container Timing's candidate set is not LCP's**, and the nested attributes' non-nullability depends on that.
 2. **Container Timing does not stop recording today**, not at first input and not at first scroll, so as things stand it is specified alongside Element Timing rather than alongside LCP. What needs writing down is that this is a choice and which one it is, because "same as LCP" is not a usable shorthand here: LCP stops at the first input, permanently; ICP stops per soft navigation context; Element Timing never stops. If the discussion under [when recording stops](#non-goals) lands on a stop condition, this is the text that changes, together with the wording that calls the aggregate cumulative over the container's lifetime.
 3. **"Lifetime" means the container root's record lifetime**, which ends when the element is disconnected from the document, when the `containertiming` attribute is removed, or when its identifier changes. The disconnection half is the part implementations are most likely to get wrong by omission, since it needs a removal hook rather than an attribute one.
-4. **The once-only rule.** Today it is an emergent property of two Paint Timing internal data structures (a persistent "set of elements with rendered text" and a consume-once "images pending rendering" list), and the only prose asserting it as a *guarantee* lives in the LCP spec, which consumes the rule rather than implementing it. Container Timing now depends on it for its selection rule, so it should be stated somewhere Container Timing can cite.
+4. **The once-only rule.** Today it is an emergent property of two Paint Timing internal data structures (a persistent "set of elements with rendered text" and a consume-once "images pending rendering" list), and the only prose asserting it as a _guarantee_ lives in the LCP spec, which consumes the rule rather than implementing it. Container Timing now depends on it for its selection rule, so it should be stated somewhere Container Timing can cite.
 5. **Nested entries exist without being queued.** `LargestContentfulPaint` and `PerformancePaintTiming` instances reachable only through these attributes are never added to the performance timeline, never delivered to an observer, and never returned by `getEntries()`. ICP and LoAF already rely on this, but neither the LCP nor the Paint Timing spec currently says an instance may exist unqueued, so the construction should be named ("synthetic" or "unqueued" entries) in whichever spec is the right home, and Container Timing should cite it rather than re-describe it.
 6. **`size` is allowed to be approximate.** Keeping the painted region exact means paying for every distinct rectangle for as long as the container records, which is the cost described under [What maintaining the aggregate costs](#what-maintaining-the-aggregate-costs). The spec should permit bounded precision rather than leave implementations to choose between conformance and a ceiling: an implementation may simplify the region it tracks, merging rectangles into stripes or collapsing to the bounding box past some complexity, provided the error runs one way. `size` may over-report the painted area, never under-report it, and it stays monotonically non-decreasing. Two things should be required to stay exact, and they are what makes the latitude cheap. `intersectionRect` is the region's bounds, and every simplification worth making adds area inside those bounds, so they need not move and the spec should say they do not. Attribution is untouched, because `largestNewContentfulPaint` and `largestContentfulPaint` are selected and sized by each element's own clipped area rather than by the region, so a coarser region costs accuracy in one number and changes nothing about which element is reported. The spec should not prescribe a simplification or a numeric bound; that is a quality of implementation matter.
 
@@ -397,15 +399,15 @@ Both deprecated attributes stay in the IDL and keep working, annotated so that a
 
 How long that state lasts depends on when this lands. The deprecation window exists to protect origin trial participants, and the trial closes around October 2026: if the implementation lands after that, the attributes can simply be removed in the same change, and the `[DeprecateAs]` annotations are worth keeping only for as long as the feature is reachable by pages that were written against the trial. The migration below is written for the deprecation case, since that is the strictly larger amount of work, and it describes exactly what a removal would require anyway.
 
-| Deprecated | Replacement | Why |
-|---|---|---|
-| `entry.lastPaintedElement` | `entry.largestNewContentfulPaint.element` | Same element, same exposure filtering, plus size, url, loadTime and renderTime |
-| `entry.firstRenderTime` | `entry.firstContentfulPaint.startTime` | Same place on the same object, and the replacement also names what painted first, how big it was and which resource it came from |
+| Deprecated                 | Replacement                               | Why                                                                                                                              |
+| -------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `entry.lastPaintedElement` | `entry.largestNewContentfulPaint.element` | Same element, same exposure filtering, plus size, url, loadTime and renderTime                                                   |
+| `entry.firstRenderTime`    | `entry.firstContentfulPaint.startTime`    | Same place on the same object, and the replacement also names what painted first, how big it was and which resource it came from |
 
 Before:
 
 ```js
-new PerformanceObserver(list => {
+new PerformanceObserver((list) => {
   for (const entry of list.getEntries()) {
     report({
       id: entry.identifier,
@@ -414,18 +416,18 @@ new PerformanceObserver(list => {
       area: entry.size,
     });
   }
-}).observe({type: 'container', buffered: true});
+}).observe({ type: "container", buffered: true });
 ```
 
 After:
 
 ```js
-new PerformanceObserver(list => {
+new PerformanceObserver((list) => {
   for (const entry of list.getEntries()) {
-    const paint = entry.largestNewContentfulPaint;   // never null
+    const paint = entry.largestNewContentfulPaint; // never null
     report({
       id: entry.identifier,
-      element: paint.element?.id,       // same element lastPaintedElement gave
+      element: paint.element?.id, // same element lastPaintedElement gave
       firstRender: entry.firstContentfulPaint.startTime,
       area: entry.size,
       // newly available, no extra bookkeeping:
@@ -435,7 +437,7 @@ new PerformanceObserver(list => {
       firstContent: entry.firstContentfulPaint.element?.id,
     });
   }
-}).observe({type: 'container', buffered: true});
+}).observe({ type: "container", buffered: true });
 ```
 
 Both migrations are a rename in place. `lastPaintedElement` becomes `largestNewContentfulPaint.element`, which is derived from it during the deprecation window so the two cannot disagree, and `firstRenderTime` becomes `firstContentfulPaint.startTime`, on the same object the reader already has.
@@ -462,7 +464,7 @@ An earlier draft routed the `firstRenderTime` replacement through the aggregate 
 
 **Reuse LCP's `LargestContentfulPaintCalculator` to compute the container's largest.** Rejected: it would drag in LCP's eligibility filter, which is the one thing this design must not inherit. Container Timing computes its own largest from its own paint feed.
 
-**A shared `ContentfulPaintAggregate` mixin** included by both `ContainerTimingInfo` and `InteractionContentfulPaint`, carrying `size`, `intersectionRect` and `largestContentfulPaint`. Deferred, not rejected. The soft-navigations explainer states that directly exposing Container Timing IDL attributes on `InteractionContentfulPaint` is an aspirational goal, and with the aggregate factored onto `ContainerTimingInfo` this becomes a more natural fit than it was when the aggregate lived on the entry: `ContainerTimingInfo` *is* the aggregate scoped by container root, and ICP the same aggregate scoped by interaction. The nullability difference would have to be reconciled first.
+**A shared `ContentfulPaintAggregate` mixin** included by both `ContainerTimingInfo` and `InteractionContentfulPaint`, carrying `size`, `intersectionRect` and `largestContentfulPaint`. Deferred, not rejected. The soft-navigations explainer states that directly exposing Container Timing IDL attributes on `InteractionContentfulPaint` is an aspirational goal, and with the aggregate factored onto `ContainerTimingInfo` this becomes a more natural fit than it was when the aggregate lived on the entry: `ContainerTimingInfo` _is_ the aggregate scoped by container root, and ICP the same aggregate scoped by interaction. The nullability difference would have to be reconciled first.
 
 **A genuine `firstPaint`, for the container's first paint of any kind.** Deferred, and the reason the name above is `firstContentfulPaint` rather than the shorter one. A container's box can be visible well before any content lands in it: a background, a border, a skeleton drawn in CSS. That moment is what a page level `first-paint` marks, and it is a real user-perceived signal that Container Timing cannot report today, because the API is fed exclusively by the image and text paint callbacks. Reporting it would need a new signal from the paint system rather than a new attribute over the existing feed, which is why it is not proposed here. Naming the current attribute `firstContentfulPaint` keeps `firstPaint` free for the concept it actually denotes, so the two could sit side by side later without either being renamed or misread.
 
@@ -490,19 +492,19 @@ Container Timing is currently the odd one out among the paint-timing APIs. `cont
 
 **(a) Keep the buffer.** An observer registering after the interesting paints replays the real sequence of updates with `buffered: true`, and non-observer code can read the same entries through `getEntriesByType()`. The cost is a capped, per-document retention of entries that most pages never read, and a cap that is observable: once it is reached, entries are dropped and the sequence a late reader sees is silently incomplete.
 
-**(b) Observer-only, like LCP and ICP.** The timeline carries updates to whoever is listening, and everything else is pulled. No cap to specify, no dropped-entry semantics, and one less way for two readers of the same page to disagree. The cost is real: an observer that registers late can no longer learn *what changed while it was not listening*, only the current state, because the aggregate is state and not history.
+**(b) Observer-only, like LCP and ICP.** The timeline carries updates to whoever is listening, and everything else is pulled. No cap to specify, no dropped-entry semantics, and one less way for two readers of the same page to disagree. The cost is real: an observer that registers late can no longer learn _what changed while it was not listening_, only the current state, because the aggregate is state and not history.
 
-*Lean: (a), and say so explicitly in the spec rather than leaving it implicit.* The sequence of updates is the one thing the pull API genuinely cannot reconstruct, and it is the thing a developer wants when a container settles in several steps: which step brought the hero content, which one merely added an icon. Dropping the buffer to match LCP would be tidier but would remove information that has no other route to script. The argument for (b) gets stronger if the trial shows nobody reads container entries outside an observer, which is worth measuring before the trial ends, since we currently have no data on it either way.
+_Lean: (a), and say so explicitly in the spec rather than leaving it implicit._ The sequence of updates is the one thing the pull API genuinely cannot reconstruct, and it is the thing a developer wants when a container settles in several steps: which step brought the hero content, which one merely added an icon. Dropping the buffer to match LCP would be tidier but would remove information that has no other route to script. The argument for (b) gets stronger if the trial shows nobody reads container entries outside an observer, which is worth measuring before the trial ends, since we currently have no data on it either way.
 
 Whichever is chosen, the interaction with the aggregate should be stated: entries and `getContainerTimingInfo()` are two views of the same recording, the aggregate is never behind the last entry, and the aggregate keeps answering after the entries for those paints have aged out of the buffer.
 
 ### 2. Should an entry also be queued when the container's largest contentful paint grows?
 
-Today a `container` entry is queued when the accumulated painted region grows, and only then. That misses the case this API most wants to report: the real content arriving over its own placeholder. An image that paints entirely inside the region the placeholder already covered adds nothing to `size`, queues nothing, and yet is the most significant thing that has happened to the container. The proposal is to widen the trigger to *the painted region grew, or the container's cumulative largest contentful paint grew*.
+Today a `container` entry is queued when the accumulated painted region grows, and only then. That misses the case this API most wants to report: the real content arriving over its own placeholder. An image that paints entirely inside the region the placeholder already covered adds nothing to `size`, queues nothing, and yet is the most significant thing that has happened to the container. The proposal is to widen the trigger to _the painted region grew, or the container's cumulative largest contentful paint grew_.
 
 The second half has to mean **the cumulative largest increased**, not "a contentful paint happened". Content reaches Container Timing once per thing it paints, so the second reading would queue an entry per contentful element, which in a large widget is hundreds. The first reading is monotonic and bounded, typically a handful of extra entries over a container's life, and it is exactly the trigger ICP already uses: a strictly larger candidate appeared. Adopting it makes the Container Timing trigger a superset of ICP's, so a container can never stay silent about a paint that ICP would have reported.
 
-*Lean: adopt it, and no longer necessarily as separate follow-up work.* It is not additive, since entry counts change for pages already using the API, which is why it was held back. With the trial closing around October 2026 and an implementation landing after that, it can be taken together with the attribute changes instead of queued behind them. What has to be settled first is not the timing but the problem below.
+_Lean: adopt it, and no longer necessarily as separate follow-up work._ It is not additive, since entry counts change for pages already using the API, which is why it was held back. With the trial closing around October 2026 and an implementation landing after that, it can be taken together with the attribute changes instead of queued behind them. What has to be settled first is not the timing but the problem below.
 
 **The problem it creates, which needs an answer before it lands.** An entry queued because the largest grew, with no growth in the painted region, carries a `size` and an `intersectionRect` identical to the previous entry for that container. Nothing on the entry says why it was queued. A consumer that treats "new entry" as "the container got bigger", or that deduplicates on `size`, sees what looks like a repeat. The options, none of them obviously right:
 
@@ -514,11 +516,11 @@ The trade-off is between an entry that explains itself and an entry surface that
 
 ### 3. Does content whose element was removed still count as the cumulative largest?
 
-*Lean: yes, current behaviour.* Page LCP and ICP say no, and consistency is the argument for that. Against it: `largestContentfulPaint` is specified as monotonic over the container's lifetime, and retracting a candidate when its element goes away breaks that: a widget that swapped its main image for a smaller one would report the smaller one as its largest ever, and the answer would depend on when you ask, which is what the pull API is meant to stop mattering. LCP's reason does not transfer cleanly: LCP is a page-load metric describing a final loaded view, a container is explicitly a thing that keeps changing. The nested object survives either way; only its `element` goes null.
+_Lean: yes, current behaviour._ Page LCP and ICP say no, and consistency is the argument for that. Against it: `largestContentfulPaint` is specified as monotonic over the container's lifetime, and retracting a candidate when its element goes away breaks that: a widget that swapped its main image for a smaller one would report the smaller one as its largest ever, and the answer would depend on when you ask, which is what the pull API is meant to stop mattering. LCP's reason does not transfer cleanly: LCP is a page-load metric describing a final loaded view, a container is explicitly a thing that keeps changing. The nested object survives either way; only its `element` goes null.
 
 ### 4. Should `ContainerTimingInfo` keep `lastPaint` at all?
 
-*Lean: drop it.* What it costs is out of proportion to what it answers, and dropping it removes a whole class of open question rather than settling one.
+_Lean: drop it._ What it costs is out of proportion to what it answers, and dropping it removes a whole class of open question rather than settling one.
 
 `firstContentfulPaint` reports `"first-contentful-paint"`, a name Paint Timing already enumerates, so `lastPaint` is the only member of this proposal that asks another specification for a new one. Removing it removes that ask entirely, and with it the fallbacks (an empty `name`, or folding the last paint into `PaintTimingMixin` on `ContainerTimingInfo` itself). It also removes an ambiguity that [Decision 2](#decisions-to-take) would otherwise create: once entries can be queued by a growing largest as well as by a growing region, "last paint" has two defensible meanings, the last paint that grew the region and the last paint that produced an entry, and neither is obviously the one a caller wants. What remains is `{firstContentfulPaint, largestContentfulPaint, size, intersectionRect}`, which is also a cleaner fit for the shared aggregate mixin sketched under future considerations.
 
@@ -528,13 +530,13 @@ Note what is not affected either way: the first contentful paint stays, on the e
 
 ### 5. Should a retired container root keep answering?
 
-*Lean: no.* A root that lost its `containertiming` attribute, changed identifier, or left the document returns null. Keeping a retired record alive raises questions with no good answer: for how long, keyed on what, and what happens when the identifier is reused elsewhere.
+_Lean: no._ A root that lost its `containertiming` attribute, changed identifier, or left the document returns null. Keeping a retired record alive raises questions with no good answer: for how long, keyed on what, and what happens when the identifier is reused elsewhere.
 
 Two of those three are how implementations already behave, since changing or removing the attribute drops the record. The third, disconnection, is a change: nothing erases a record on removal today, so a detached root keeps answering for as long as script holds it. Treating all three the same way is the point of the lean, and the full table, including the identifier round trip, is in [a container root's history ends when it stops being a connected container root](#a-container-roots-history-ends-when-it-stops-being-a-connected-container-root).
 
 ### 6. Should object identity across calls be normative?
 
-*Lean: document, do not require.* Building nested objects at paint time is forced by navigation identity; identity across calls falls out of it. Requiring it constrains implementations that would rather build at query time, for something script can reproduce by comparing `renderTime` and `size`. Explicitly permitting it, so the difference is not a conformance bug either way, may be the middle.
+_Lean: document, do not require._ Building nested objects at paint time is forced by navigation identity; identity across calls falls out of it. Requiring it constrains implementations that would rather build at query time, for something script can reproduce by comparing `renderTime` and `size`. Explicitly permitting it, so the difference is not a conformance bug either way, may be the middle.
 
 ## References
 
