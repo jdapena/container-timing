@@ -42,7 +42,7 @@ Working through it surfaced two things that are not mechanical, so this document
 
 `lastPaintedElement` resets its comparison on each emission, so it describes one update. But a developer also wants the container hero content over its whole life, and that is not derivable from an entry stream you may not have received.
 
-The concrete case: a contentful paint landing entirely inside the already-painted region queues no entry at all (the container did not grow) while still being able to be the largest thing the container ever painted.
+One concrete case today: a contentful paint landing entirely inside the already-painted region queues no entry at all (the container did not grow) while still being able to be the largest thing the container ever painted. [Decision 2](#decisions-to-take) proposes closing that hole at the trigger, which would be a good change on its own, but it does not remove the need for the aggregate: an entry reports what changed at the moment it was queued, and the state has to be reachable later, by code that was not listening then.
 
 The entry buffer is a second case: it is capped, so on a busy page the entries carrying the state are eventually dropped, and code that reads them later sees a truncated history.
 
@@ -79,7 +79,7 @@ Three problems, all consequences of putting everything on a per-update entry:
 
 1. **The attribution is a bare `Element?`.** No size, no URL, no load time, no render time. Everything a developer would correlate by hand against Resource Timing, and everything ICP's nested LCP already carries.
 2. **There is no cumulative hero content.** `lastPaintedElement` resets on emission by design. The only way to answer to "what is the biggest thing this container has ever painted?" is getting all the `PerformanceContainerTiming` entries. Worse compared to the solution in ICP and less comparable with LCP.
-3. **Entries are not always there.** A contentful paint inside the already-painted region queues nothing at all, because the container did not grow. And the entry buffer is capped, so a long-lived page loses its early entries. In both cases the container holds state that no reachable entry reports.
+3. **Entries are not always there when the state is wanted.** The entry buffer is capped, so a long-lived page loses its early entries, and code that never registered an observer has no interest in the stream at all but may still want the numbers. A contentful paint inside the already-painted region also queues nothing today, because the container did not grow; that particular gap is what [Decision 2](#decisions-to-take) would close.
 
 ## Motivating use cases
 
@@ -259,10 +259,13 @@ The nested object carries its own `paintTime` / `presentationTime`, so an elemen
 
 (If [decision 1](#decisions-to-take) goes the way it is leaning, this section stops being a workaround argument and becomes the definition of the split.)
 
-The aggregate's whole value is being independent of the entry stream, and the entry stream has two holes:
+The aggregate's whole value is being independent of the entry stream:
 
+- **An entry describes a moment, the aggregate describes the container.** Reading accumulated state off a stream of updates means keeping every update, or trusting that the one you have is the last. Asking is neither.
 - **The entry buffer is capped** (150 in Chromium, with the overflow counted as dropped entries). A cumulative largest carried on entries inherits that cap, so it goes stale exactly on the pages that paint the most. Pulled state does not.
-- **Some contentful paints queue no entry at all.** A paint landing entirely inside the already-painted region does not grow the container, so nothing is emitted. But it is still a contentful paint and can still become the container's largest.
+- **The reader may never have been listening.** Teardown code, a beacon at unload, a debugging console session: none of them have an observer, and with `buffered: true` they would still only receive what the buffer kept.
+
+There is a fourth hole today, a contentful paint landing entirely inside the already-painted region, which queues no entry because the container did not grow. [Decision 2](#decisions-to-take) would close that one at the trigger. The three above survive it.
 
 A pull API has neither problem, and it lets script ask at teardown time rather than keeping an observer alive.
 
@@ -411,7 +414,7 @@ If trial feedback says the null case bites in practice, option 2 remains availab
 
 **Keep `lastPaintedElement` and add scalar attributes next to it** (`lastPaintedSize`, `lastPaintedUrl`, ...). Rejected: it re-derives, attribute by attribute, an interface the platform already has, and the result would not be comparable with LCP or ICP entries without callers knowing the correspondence by hand.
 
-**Put the cumulative largest on the entry as a second attribute.** Rejected: the entry buffer is capped, and a fully-contained contentful paint queues no entry at all, so an entry attribute cannot always carry it.
+**Put the cumulative largest on the entry as a second attribute.** Rejected: the entry buffer is capped, and an entry only exists at the moments the container happened to change, so an entry attribute cannot answer for a reader that arrived later. Widening the trigger, as in [Decision 2](#decisions-to-take), adds moments but does not make them reachable afterwards.
 
 **Select the largest by newly contributed area** (the "delta credit" rule that shipped first). Rejected after review: it makes the result depend on paint processing order, both within a frame and across loads, and it double-counts overlaps.
 
