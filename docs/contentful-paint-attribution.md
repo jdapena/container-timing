@@ -52,24 +52,30 @@ The timeline carries *updates* (what changed, when, and what content drove it). 
 
 Every attribute below follows from that split, and it is also the framing under which [Decision 1](#decisions-to-take) (do `container` entries still need a timeline buffer at all?) becomes answerable.
 
-#### Origin trial
+#### Where this sits relative to the origin trial
 
-Everything proposed is additive for the duration of the origin trial:
+The Chrome origin trial runs from m148 to m153 and closes around October 2026. This document was first written inside that window, when every change had to be additive, and that constraint is expiring: discussion of this proposal is expected over the coming weeks, and an implementation prepared now would land after the trial has closed.
 
-- `lastPaintedElement` and `firstRenderTime` are deprecated but keep working.
-- `startTime`, `duration`, `name`, `entryType`, `identifier`, `rootElement`, `intersectionRect` and the emission trigger are untouched.
+That changes what is on the table rather than what is proposed. The attribute changes are additive either way and do not depend on the timing. What the closing trial unlocks is the removal of the attributes this document deprecates, and the two decisions that were held back precisely because they are not additive: whether `container` entries keep a timeline buffer ([Decision 1](#decisions-to-take)) and whether an entry should also be queued when the container's largest contentful paint grows ([Decision 2](#decisions-to-take)).
+
+The staging this implies:
+
+- **Landing during the trial**, if any of it does: additive only. `lastPaintedElement` and `firstRenderTime` are deprecated but keep working, and `startTime`, `duration`, `name`, `entryType`, `identifier`, `rootElement`, `intersectionRect` and the emission trigger are untouched.
+- **Landing after it closes**: the deprecated attributes can be removed in the same change rather than left to a later one, and Decisions 1 and 2 can be taken on their merits instead of on what the trial can absorb.
+
+Where this document says an attribute is kept for compatibility, read it as compatibility with what trial participants measured, which stops binding once the trial is over. Where a choice also has a design argument, that argument is stated separately and stands on its own.
 
 ## Goals
 
 - Align Container Timing's attribution with ICP's: a nested `LargestContentfulPaint` instead of an element reference, with `size` measured the way LCP measures it so the values are comparable across the three APIs.
 - Split per-update reporting from accumulated state, and make the accumulated state reachable without an observer and without depending on the entry buffer.
-- Keep every currently shipping behaviour intact for origin trial participants.
+- Avoid gratuitous breakage for origin trial participants: anything not additive is staged for after the trial closes rather than dropped into it.
 
 ## Non-goals
 
-- **Changing `startTime` / `duration` anchoring.** ICP anchors `startTime` to the interaction that caused the paint. Adopting that here would silently change two attributes trial participants already measure against. Out of scope.
+- **Changing `startTime` / `duration` anchoring.** ICP anchors `startTime` to the interaction that caused the paint. Out of scope, and for a reason that outlives the trial: under ICP's convention `startTime` would become constant per container root, which reorders `getEntriesByType()` results by container instead of chronologically. The compatibility argument is the weaker of the two and is the one that expires.
 - **Adopting LCP's candidate eligibility rules.** Container Timing deliberately reports paints LCP declines to treat as candidates. See [Container Timing's contentful set is not LCP's](#container-timings-contentful-set-is-not-lcps).
-- **Removing the deprecated attributes now.** They go when the origin trial ends.
+- **Removing the deprecated attributes, if any part of this lands during the trial.** Once it closes, removal moves back on the table and is the preferred end state.
 - **Exposing a list of everything newly painted**, LoAF-`scripts`-style. A container filling with hundreds of images in one frame would carry hundreds of sub-entries.
 - **Unifying with ICP's aggregate shape.** A shared `ContentfulPaintAggregate` mixin is discussed in [Considered alternatives](#considered-alternatives) as future work, not as part of this change.
 
@@ -108,7 +114,8 @@ interface PerformanceContainerTiming : PerformanceEntry {
     // NEW. This entry's container root's aggregate view, queried live.
     ContainerTimingInfo? getContainerTimingInfo();
 
-    // DEPRECATED. Removed when the origin trial ends.
+    // DEPRECATED. Removed once the origin trial closes, in this change if it
+    // lands after that, in a follow-up if it lands before.
     readonly attribute Element? lastPaintedElement;
     readonly attribute DOMHighResTimeStamp firstRenderTime;
 
@@ -356,7 +363,9 @@ These are the contract, not afterthoughts. Each is behaviour the design above de
 
 ## Deprecations and migration
 
-Both deprecated attributes stay in the IDL and keep working, annotated so that access increments a use counter and raises a DevTools issue naming the replacement. They are removed once the origin trial ends. This mirrors the pattern already used in this feature for the `containertiming-ignore` → `containertimingignore` attribute rename.
+Both deprecated attributes stay in the IDL and keep working, annotated so that access increments a use counter and raises a DevTools issue naming the replacement. This mirrors the pattern already used in this feature for the `containertiming-ignore` to `containertimingignore` attribute rename.
+
+How long that state lasts depends on when this lands. The deprecation window exists to protect origin trial participants, and the trial closes around October 2026: if the implementation lands after that, the attributes can simply be removed in the same change, and the `[DeprecateAs]` annotations are worth keeping only for as long as the feature is reachable by pages that were written against the trial. The migration below is written for the deprecation case, since that is the strictly larger amount of work, and it describes exactly what a removal would require anyway.
 
 | Deprecated | Replacement | Why |
 |---|---|---|
@@ -462,7 +471,7 @@ Today a `container` entry is queued when the accumulated painted region grows, a
 
 The second half has to mean **the cumulative largest increased**, not "a contentful paint happened". Content reaches Container Timing once per thing it paints, so the second reading would queue an entry per contentful element, which in a large widget is hundreds. The first reading is monotonic and bounded, typically a handful of extra entries over a container's life, and it is exactly the trigger ICP already uses: a strictly larger candidate appeared. Adopting it makes the Container Timing trigger a superset of ICP's, so a container can never stay silent about a paint that ICP would have reported.
 
-*Lean: adopt it, as follow-up work rather than as part of this change.* It is not additive: entry counts change for pages already using the API, so it belongs after the origin trial rather than inside it, and after the attribute changes above have landed.
+*Lean: adopt it, and no longer necessarily as separate follow-up work.* It is not additive, since entry counts change for pages already using the API, which is why it was held back. With the trial closing around October 2026 and an implementation landing after that, it can be taken together with the attribute changes instead of queued behind them. What has to be settled first is not the timing but the problem below.
 
 **The problem it creates, which needs an answer before it lands.** An entry queued because the largest grew, with no growth in the painted region, carries a `size` and an `intersectionRect` identical to the previous entry for that container. Nothing on the entry says why it was queued. A consumer that treats "new entry" as "the container got bigger", or that deduplicates on `size`, sees what looks like a repeat. The options, none of them obviously right:
 
