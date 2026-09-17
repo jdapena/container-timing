@@ -29,7 +29,7 @@
 - [Privacy and security considerations](#privacy-and-security-considerations)
 - [Stakeholder feedback](#stakeholder-feedback)
 - [Decisions to take](#decisions-to-take)
-- [References and acknowledgements](#references-and-acknowledgements)
+- [References](#references)
 
 ## Introduction
 
@@ -538,7 +538,7 @@ Note what is not affected either way: the first contentful paint stays, on the e
 
 *Lean: document, do not require.* Building nested objects at paint time is forced by navigation identity; identity across calls falls out of it. Requiring it constrains implementations that would rather build at query time, for something script can reproduce by comparing `renderTime` and `size`. Explicitly permitting it, so the difference is not a conformance bug either way, may be the middle.
 
-## References and acknowledgements
+## References
 
 - Container Timing explainer: https://github.com/WICG/container-timing/
 - Container Timing spec draft: https://bloomberg.github.io/container-timing/
@@ -547,5 +547,3 @@ Note what is not affected either way: the first contentful paint stays, on the e
 - Element Timing: https://wicg.github.io/element-timing/
 - Soft Navigations / Interaction Contentful Paint: https://wicg.github.io/soft-navigations/
 - Background on the `lastPaintedElement` semantics: https://github.com/WICG/container-timing/issues/53
-
-Thanks to Michal Mocny and Scott Haseley for review feedback on the Chromium implementation, and to the Bloomberg Container Timing authors for the original design.
