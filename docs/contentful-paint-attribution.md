@@ -155,7 +155,7 @@ partial interface Element {
 
 ### Four things to notice
 
-<!--TODO(dape): not sure what this paragraph is about--> **The nested objects are never queued**, as in ICP and LoAF. Their `entryType` and `name` are the ordinary ones for their interface (`"largest-contentful-paint"`; `"paint"` named `"first-paint"` / `"last-paint"`) and `toJSON()` behaves normally. No spec currently says an instance may exist unqueued, so that needs naming somewhere. See see [Semantics that need explicit spec text](#semantics-that-need-explicit-spec-text).
+**The nested objects are never queued**, as in ICP and LoAF. Their `entryType` and `name` are the ordinary ones for their interface (`"largest-contentful-paint"`; `"paint"` named `"first-paint"` / `"last-paint"`) and `toJSON()` behaves normally. No spec currently says an instance may exist unqueued, so that needs naming somewhere. See see [Semantics that need explicit spec text](#semantics-that-need-explicit-spec-text).
 
 **`getContainerTimingInfo()` is a live query, not a snapshot.** Both overloads return the root's state *now*, which on a `PerformanceEntry` could be unusual enough to be worth stating twice: an entry buffered ten seconds ago answers with today's aggregate, not with the aggregate as of its own `startTime`. Same pattern as `PerformanceSoftNavigation.getLargestInteractionContentfulPaint()`. It is a method rather than an attribute partly to signal this. It never throws: a non-root element, a retired root, and a root that has painted nothing all return null.
 
