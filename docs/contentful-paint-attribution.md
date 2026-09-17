@@ -12,7 +12,6 @@
 
 - Spec draft: https://wicg.github.io/container-timing/
 - Repository / issues: https://github.com/WICG/container-timing/
-- Related: [WICG/container-timing#53 `lastPaintedElement` semantics](https://github.com/WICG/container-timing/issues/53)
 
 ## Table of contents
 
@@ -234,7 +233,7 @@ An observer that does not hold the element is not left empty handed. Each entry 
 
 A Container Timing entry fires on *aggregate area growth*, which is neither of these. Without the cumulative one you cannot identify a container's hero content; without the per-update one you cannot tell what changed. Because both use the same selection rule and differ only in the reset, the lifetime maximum is exactly the maximum of the per-entry ones.
 
-**On naming:** `lastContentfulPaint` was considered for the per-update one and rejected. `last*` reintroduces the "last in paint order" misreading that [WICG/container-timing#53](https://github.com/WICG/container-timing/issues/53) set out to remove. The attribute selects the *largest* new contributor, not the most recent one. Giving both attributes the same name in their two places was also rejected: two identically named attributes with different accumulation windows would make this API hard to read.
+**On naming:** `lastContentfulPaint` is the obvious alternative for the per-update attribute and is not proposed. `last*` says "most recent", and the attribute names the largest, not the most recent. The distinction is the whole point of the change: `lastPaintedElement` named whichever element happened to paint last, which is an artifact of the order paints are processed in rather than an answer to what drove the update, and a name beginning with `last` invites that reading straight back in. Giving both attributes the same name in their two places was also rejected: two identically named attributes with different accumulation windows would make this API hard to read.
 
 ### Both maxima are selected and sized by the element's own clipped area
 
@@ -443,7 +442,7 @@ An earlier draft routed the `firstRenderTime` replacement through the aggregate 
 
 **Select the largest by newly contributed area** (the "delta credit" rule that shipped first). Rejected after review: it makes the result depend on paint processing order, both within a frame and across loads, and it double-counts overlaps.
 
-**Restrict candidates to elements that grow the painted region**, per [issue #53](https://github.com/WICG/container-timing/issues/53). Rejected: one rule has to cover both accumulation windows, or the lifetime largest stops being the maximum of the per-entry ones. Besides, content reaches Container Timing only once, so the guard is not needed.
+**Restrict candidates to the elements that grow the painted region**, so that an entry only ever nominates content which contributed to it. Rejected: one rule has to cover both accumulation windows, or the lifetime largest stops being the maximum of the per-entry ones. Besides, content reaches Container Timing only once, so the guard is not needed.
 
 **An aggregate accessor on the entry**, `PerformanceContainerTiming.getContainerTimingInfo()`, mirroring the one on `Element`. Proposed in an earlier draft and now rejected. A `PerformanceEntry` is frozen at creation, so a method on it that answers about the container's state now reads as a snapshot and is not one, and no amount of prose fixes a shape that has to be explained twice. It was load-bearing for one case, a late observer wanting final numbers for a root that has since been detached and that it holds no reference to. That case is now partly covered, since every entry carries `firstContentfulPaint` and a `largestNewContentfulPaint` with a real `size`, so an observer can fold what it received; what remains uncovered is state from before it was listening, and that is accepted.
 
@@ -473,7 +472,7 @@ The pull API adds availability, not observability: everything it returns is alre
 
 ## Stakeholder feedback
 
-Michal Mocny's review drove the switch from contributed-area selection to the element's own inherent size ("doing size delta just adds paint-order issues across multiple frames"); that is applied, and is the subject of [issue #53](https://github.com/WICG/container-timing/issues/53). The shape proposed here is otherwise still under discussion. No signals from other engines.
+Review feedback drove the switch from contributed-area selection to the element's own inherent size, on the grounds that a size delta adds paint-order problems across frames. That is applied, and the reasoning is set out under [both maxima are selected and sized by the element's own clipped area](#both-maxima-are-selected-and-sized-by-the-elements-own-clipped-area). The rest of the shape proposed here is still under discussion. No signals from other engines.
 
 ## Decisions to take
 
@@ -535,6 +534,6 @@ Note what is not affected either way: the first contentful paint stays, on the e
 - Paint Timing: https://w3c.github.io/paint-timing/
 - Element Timing: https://wicg.github.io/element-timing/
 - Soft Navigations / Interaction Contentful Paint: https://wicg.github.io/soft-navigations/
-- WICG/container-timing#53: `lastPaintedElement` semantics
+- Background on the `lastPaintedElement` semantics: https://github.com/WICG/container-timing/issues/53
 
 Thanks to Michal Mocny and Scott Haseley for review feedback on the Chromium implementation, and to the Bloomberg Container Timing authors for the original design.
