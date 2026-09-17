@@ -112,8 +112,10 @@ interface PerformanceContainerTiming : PerformanceEntry {
     // container's previous entry. Non-nullable. Supersedes lastPaintedElement.
     readonly attribute LargestContentfulPaint largestNewContentfulPaint;
 
-    // NEW. This entry's container root's aggregate view, queried live.
-    ContainerTimingInfo? getContainerTimingInfo();
+    // NEW. The container's first contentful paint. Constant for a given
+    // container root, and the same object on every entry for it.
+    // Supersedes firstRenderTime.
+    readonly attribute LargestContentfulPaint firstContentfulPaint;
 
     // DEPRECATED. Removed once the origin trial closes, in this change if it
     // lands after that, in a follow-up if it lands before.
@@ -155,17 +157,17 @@ partial interface Element {
 | What content grew this container just now? | `entry.largestNewContentfulPaint` |
 | How big is the container now, and where? | `entry.size` / `entry.intersectionRect` (as of this entry), or `info.size` / `info.intersectionRect` (as of the last presented frame) |
 | What is this container's hero content, overall? | `info.largestContentfulPaint` |
-| When did this container first render content? | `info.firstPaint` |
+| When did this container first render content, and with what? | `entry.firstContentfulPaint`, or `info.firstContentfulPaint` |
 | When did it last grow? | `info.lastPaint` |
 | Any of the above, with no observer attached | `element.getContainerTimingInfo()` |
 
-...where `info` is `element.getContainerTimingInfo()` or `entry.getContainerTimingInfo()`.
+...where `info` is `element.getContainerTimingInfo()`.
 
 ### Four things to notice
 
 **The nested objects are never queued**, as in ICP and LoAF. Their `entryType` and `name` are the ordinary ones for their interface (`"largest-contentful-paint"`; `"paint"` named `"first-paint"` / `"last-paint"`) and `toJSON()` behaves normally. No spec currently says an instance may exist unqueued, so that needs naming somewhere. See see [Semantics that need explicit spec text](#semantics-that-need-explicit-spec-text).
 
-**`getContainerTimingInfo()` is a live query, not a snapshot.** Both overloads return the root's state *now*, which on a `PerformanceEntry` could be unusual enough to be worth stating twice: an entry buffered ten seconds ago answers with today's aggregate, not with the aggregate as of its own `startTime`. Same pattern as `PerformanceSoftNavigation.getLargestInteractionContentfulPaint()`. It is a method rather than an attribute partly to signal this. It never throws: a non-root element, a retired root, and a root that has painted nothing all return null.
+**`getContainerTimingInfo()` is a live query, and it lives only on `Element`.** It returns the root's state at the moment of the call, which is the point of it. An earlier draft put the same method on the entry as well; that is [rejected](#considered-alternatives), because a `PerformanceEntry` is otherwise frozen at creation and a method on it answering about now invites exactly the wrong reading. It never throws: a non-root element, a retired root, and a root that has painted nothing all return null.
 
 **The nested paint attributes are non-nullable because content is reported once.** An entry exists only because the painted region grew, so there is always newly painted content to nominate; a container has an aggregate view only once something painted in it. "Nothing yet" is `getContainerTimingInfo()` returning null, not null attributes inside a `ContainerTimingInfo`.
 
@@ -214,7 +216,7 @@ Detaching the element is fine: a detached root keeps answering for as long as sc
 
 Removing the `containertiming` attribute or changing its identifier is not: that ends the root's history and `getContainerTimingInfo()` returns null. See [A container root's history ends when it stops being a container root](#a-container-roots-history-ends-when-it-stops-being-a-container-root).
 
-The same method exists on the entry, so an observer can reach the aggregate without holding the element: `entry.getContainerTimingInfo()`, answering about the root *now*.
+An observer that does not hold the element is not left empty handed. Each entry carries `firstContentfulPaint` and a `largestNewContentfulPaint` with a real `size`, so folding the stream recovers the largest over the paints it saw. What it cannot recover is the state of a root it never observed, which is the trade accepted when the aggregate accessor was taken off the entry.
 
 ## Detailed design discussion
 
@@ -335,12 +337,6 @@ The round-trip case is the one worth spelling out because "cumulative over the c
 
 All of this is already today's behaviour for the entry stream (changing or removing the attribute already drops the container's record), but with a pull API it becomes directly observable, so it has to be specified rather than left as an implementation detail. The corollary for authors: query final numbers **before** teardown, and treat the attribute as write-once.
 
-### Why the entry reaches its root unfiltered
-
-The entry's `getContainerTimingInfo()` deliberately does **not** go through `rootElement`. `rootElement` applies the usual node-exposure filter, which rejects a disconnected node, so it is already null once a widget has been torn out of the document, which is exactly the moment the final numbers are wanted. Routing the method through it would make the aggregate unreachable in the teardown case the pull API exists for.
-
-This exposes nothing new. The method returns a `ContainerTimingInfo`, never the root element itself, and the root is always in the same document as the performance object that queued the entry, so a caller learns only about content it could already observe. `rootElement` keeps its current filtering, unchanged.
-
 ### `size` becomes `unsigned long long`
 
 The IDL declared `size` as `double` while the spec draft says `unsigned long long`. This aligns on `unsigned long long`. The value is an integer pixel count in every existing implementation, so no observable value changes; `toJSON()` now emits an integer.
@@ -392,7 +388,7 @@ How long that state lasts depends on when this lands. The deprecation window exi
 | Deprecated | Replacement | Why |
 |---|---|---|
 | `entry.lastPaintedElement` | `entry.largestNewContentfulPaint.element` | Same element, same exposure filtering, plus size, url, loadTime and renderTime |
-| `entry.firstRenderTime` | `entry.getContainerTimingInfo()?.firstPaint.startTime` | An object with a `paintTime` / `presentationTime` split instead of a bare presentation timestamp |
+| `entry.firstRenderTime` | `entry.firstContentfulPaint.startTime` | Same place on the same object, and the replacement also names what painted first, how big it was and which resource it came from |
 
 Before:
 
@@ -415,17 +411,16 @@ After:
 new PerformanceObserver(list => {
   for (const entry of list.getEntries()) {
     const paint = entry.largestNewContentfulPaint;   // never null
-    const info = entry.getContainerTimingInfo();     // null if no longer a root
     report({
       id: entry.identifier,
       element: paint.element?.id,       // same element lastPaintedElement gave
-      firstRender: info?.firstPaint.startTime,
+      firstRender: entry.firstContentfulPaint.startTime,
       area: entry.size,
       // newly available, no extra bookkeeping:
       elementArea: paint.size,
       resource: paint.url,
       resourceLoaded: paint.loadTime,
-      hero: info?.largestContentfulPaint.element?.id,
+      firstContent: entry.firstContentfulPaint.element?.id,
     });
   }
 }).observe({type: 'container', buffered: true});
@@ -433,13 +428,9 @@ new PerformanceObserver(list => {
 
 `lastPaintedElement` is now derived from `largestNewContentfulPaint.element`, so the two cannot disagree during the deprecation window, and that migration is a pure rename.
 
-**The `firstRenderTime` migration is not a pure rename, and it costs something.** A scalar read becomes a method call, an optional chain and a property walk, and unlike the old attribute it can come back null for a root that has stopped being a container root, which is exactly the case where the old attribute still worked, since the entry carried its own copy. Three options were weighed:
+Both migrations are now a rename in place. `lastPaintedElement` becomes `largestNewContentfulPaint.element`, which is derived from it during the deprecation window so the two cannot disagree, and `firstRenderTime` becomes `firstContentfulPaint.startTime`, on the same object the reader already has.
 
-1. **Keep `firstRenderTime` undeprecated.** Rejected: it is a presentation-time-only scalar, which is the limitation the object form exists to remove, and keeping it means shipping two ways to ask the same question permanently.
-2. **Add a non-deprecated `firstPaint` convenience to the entry**, alongside `largestNewContentfulPaint`. This is a genuine option and is not foreclosed. It costs one attribute and removes the regression entirely, at the price of duplicating aggregate state onto a per-update object, which is the conflation this proposal is trying to undo, and it would mean two `firstPaint` objects with the same value on two surfaces.
-3. **Aggregate state lives on the aggregate view. (Chosen.)** The first render time is a property of the container, not of an update; every entry for a container repeating the same timestamp is a symptom of the original conflation. The verbosity is real but small, and the null case is the same rule as everything else on the aggregate view.
-
-If trial feedback says the null case bites in practice, option 2 remains available without any breaking change.
+An earlier draft routed the `firstRenderTime` replacement through the aggregate view, which made it a method call, an optional chain and a property walk, and left it returning null for a root that had stopped being a container root, the one case where the old scalar still worked. Putting the first contentful paint on the entry removes all of that. It is also the one piece of aggregate state that can live on a frozen record without contradiction, because it never changes after the container's first paint: everything that moves stays on the pull API.
 
 ## Considered alternatives
 
@@ -451,7 +442,9 @@ If trial feedback says the null case bites in practice, option 2 remains availab
 
 **Restrict candidates to elements that grow the painted region**, per [issue #53](https://github.com/WICG/container-timing/issues/53). Rejected: one rule has to cover both accumulation windows, or the lifetime largest stops being the maximum of the per-entry ones. Besides, content reaches Container Timing only once, so the guard is not needed.
 
-**Keep a non-deprecated `firstPaint` on the entry** so that migrating off `firstRenderTime` stays a one-line change. Not rejected outright (see [Deprecations and migration](#deprecations-and-migration)), but not proposed, because per-container state repeated on every per-update entry is the conflation this change sets out to undo.
+**An aggregate accessor on the entry**, `PerformanceContainerTiming.getContainerTimingInfo()`, mirroring the one on `Element`. Proposed in an earlier draft and now rejected. A `PerformanceEntry` is frozen at creation, so a method on it that answers about the container's state now reads as a snapshot and is not one, and no amount of prose fixes a shape that has to be explained twice. It was load-bearing for one case, a late observer wanting final numbers for a root that has since been detached and that it holds no reference to. That case is now partly covered, since every entry carries `firstContentfulPaint` and a `largestNewContentfulPaint` with a real `size`, so an observer can fold what it received; what remains uncovered is state from before it was listening, and that is accepted.
+
+**Keeping `firstRenderTime` and adding nothing**, rather than replacing it with `firstContentfulPaint` on the entry. Rejected: a presentation-time-only scalar cannot express the `paintTime` and `presentationTime` split, and it names a time without naming what took that long to paint.
 
 **Adopt ICP's `startTime` / `duration` anchoring.** Rejected for compatibility, and there is an independent design argument: under ICP's convention `startTime` would become constant per container root, so every entry for a long-lived container would carry the same timestamp. Unlike `interaction-contentful-paint` and `largest-contentful-paint`, which are observer-only, `container` entries are retrievable through `performance.getEntriesByType()`, which sorts by `startTime`, so the result would be grouped by container root rather than chronological.
 
@@ -468,8 +461,6 @@ Most of this exposes nothing new. `largestNewContentfulPaint.element` applies th
 One part is new to Container Timing, though not to the platform. The nested entry carries an image's `url` and `loadTime`, which no `container` entry carries today. Both are already available to the same document through Resource Timing for any image, cross-origin or not: the URL is the resource entry's `name`, and `responseEnd` is not among the attributes gated on the timing allow check. Element Timing reports the same two values for an annotated image, and LCP and ICP nest the same construction without a gate of their own. So this is not a route to data the document could not otherwise obtain, and the question is scale rather than kind: Element Timing asks for a per-element annotation, while one `containertiming` attribute enables reporting for everything painting in the subtree. See the corresponding item under [Semantics that need explicit spec text](#semantics-that-need-explicit-spec-text). Text candidates raise none of this: they carry an empty `url` and a zero `loadTime`.
 
 The repository's `security-review.md` records that the API introduces no new cross-origin information exposure. That conclusion still holds on this analysis, but it was written for an API with no resource fields at all, so it is worth re-confirming against the nested entry rather than carried forward untouched.
-
-The one deliberate relaxation: the entry's `getContainerTimingInfo()` reaches its root without the node-exposure filter, because that filter rejects disconnected nodes and would make the teardown case unreachable. It returns a `ContainerTimingInfo`, never the element, and the root is always in the same document as the performance object that queued the entry.
 
 The pull API adds availability, not observability: everything it returns is already computed for the entry stream. What changes is that it is reachable when no entry carried it.
 
