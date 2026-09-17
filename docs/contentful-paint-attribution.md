@@ -130,9 +130,12 @@ PerformanceContainerTiming includes PaintTimingMixin;   // this update's paint
 // lifetime rather than describing a single update.
 [Exposed=Window, RuntimeEnabled=ContainerTiming]
 interface ContainerTimingInfo {
-    // When the container first painted content, and the most recent paint that
-    // grew its painted region. firstPaint supersedes firstRenderTime.
-    readonly attribute PerformancePaintTiming firstPaint;
+    // The container's first contentful paint, the same object the entry
+    // carries. Supersedes firstRenderTime.
+    readonly attribute LargestContentfulPaint firstContentfulPaint;
+
+    // The most recent paint that grew the painted region. See Decision 4:
+    // the lean is to drop this.
     readonly attribute PerformancePaintTiming lastPaint;
 
     // The largest contentful paint over the container's lifetime. Monotonic.
@@ -165,7 +168,7 @@ partial interface Element {
 
 ### Four things to notice
 
-**The nested objects are never queued**, as in ICP and LoAF. Their `entryType` and `name` are the ordinary ones for their interface (`"largest-contentful-paint"`; `"paint"` named `"first-paint"` / `"last-paint"`) and `toJSON()` behaves normally. No spec currently says an instance may exist unqueued, so that needs naming somewhere. See see [Semantics that need explicit spec text](#semantics-that-need-explicit-spec-text).
+**The nested objects are never queued**, as in ICP and LoAF. Their `entryType` and `name` are the ordinary ones for their interface (`"largest-contentful-paint"`, and for `lastPaint` if it survives [Decision 4](#decisions-to-take), `"paint"` named `"last-paint"`) and `toJSON()` behaves normally. No spec currently says an instance may exist unqueued, so that needs naming somewhere. See see [Semantics that need explicit spec text](#semantics-that-need-explicit-spec-text).
 
 **`getContainerTimingInfo()` is a live query, and it lives only on `Element`.** It returns the root's state at the moment of the call, which is the point of it. An earlier draft put the same method on the entry as well; that is [rejected](#considered-alternatives), because a `PerformanceEntry` is otherwise frozen at creation and a method on it answering about now invites exactly the wrong reading. It never throws: a non-root element, a retired root, and a root that has painted nothing all return null.
 
@@ -201,7 +204,7 @@ function teardownWidget(widget) {
   if (info) {
     beacon({
       id: widget.getAttribute('containertiming'),
-      firstPaint: info.firstPaint.startTime,
+      firstPaint: info.firstContentfulPaint.startTime,
       lastPaint: info.lastPaint.startTime,
       hero: info.largestContentfulPaint.element?.id,
       heroSize: info.largestContentfulPaint.size,
@@ -281,17 +284,17 @@ A pull API has neither problem, and it lets script ask at teardown time rather t
 
 One implementation consequence, worth carrying into any engine: **recording must not be gated on whether an entry can be queued.** Chromium's text path used to consult "can I report to container timing?", which is false once the buffer is full with nobody observing, so text paints stopped reaching the aggregate while image paints kept arriving. With a pull API that becomes web-visible.
 
-### `firstPaint` and `lastPaint` are objects, not timestamps
+### The first paint is a contentful paint, not a timestamp
 
-`PerformancePaintTiming` is `PerformanceEntry` plus `PaintTimingMixin` and nothing else. Nesting one gives the container's first render its own `paintTime` / `presentationTime` split, which the bare `firstRenderTime` scalar, a presentation time only, cannot express.
+`firstRenderTime` is a presentation timestamp and nothing else. It cannot say when the frame was painted as opposed to when it was presented, and the two can be tens of milliseconds apart on a loaded machine, which is exactly the situation a developer profiling a slow widget is in. It also names a time without naming what took that long to arrive.
 
-`lastPaint` is the most recent paint that actually **grew** the container's painted region. Together the two bracket the interval over which the container was still settling, so a caller can answer "has anything new been damaged in here since T?" without having received an entry. That is the case for keeping it; [Decision 4](#decisions-to-take) sets out the stronger case for dropping it, and this section describes the shape as currently implemented rather than as recommended.
+`firstContentfulPaint` is a `LargestContentfulPaint`, which includes `PaintTimingMixin`, so it carries the `paintTime` and `presentationTime` split and, on top of that, the element that painted first, its size, and for an image its URL and load time. The container's story becomes readable from two objects: this is what appeared first, that is the largest thing that ever appeared, and here is how long apart they were.
 
-Note the asymmetry this creates with the cumulative largest: a fully-contained paint can advance `largestContentfulPaint` without advancing `lastPaint`, so the cumulative largest's `renderTime` may be **later** than `lastPaint`.
+Using `LargestContentfulPaint` for a paint that is not a largest is a wart, and worth stating before a reviewer finds it. The interface is the platform's only record of a contentful paint, ICP already nests it for a scope-specific largest, and this extends that reuse one step. The alternative is a second interface that differs only in name.
 
-Whether that is worth a third name in Paint Timing's enumeration is a fair question, and the fallbacks are listed in [Four things to notice](#four-things-to-notice). The case for paying it: `firstRenderTime` is a presentation timestamp with no way to say when the frame was painted, and the two can be tens of milliseconds apart on a loaded machine, which is exactly the situation a developer profiling a slow widget is in. A scalar cannot be extended later without another attribute; an object can.
+The name deserves care for a different reason. This is **not** the page-level first contentful paint scoped to a container. The page's `paint` entries mark when the document first painted anything, and when it first painted content, without attributing either to an element. `firstContentfulPaint` here names the first image or text that Container Timing observed inside this container root, with that element attached.
 
-Named `firstPaint` rather than `firstContentfulPaint`: strictly this is a contentful paint, since Container Timing only tracks images and text, but from the container's point of view it is simply the first paint the API knows about, and the shorter name is clearer. To be explicit for spec readers, since the names collide: this is **not** the page-level `first-paint` entry scoped to a container. The page's `first-paint` marks the first time the document painted anything at all, including non-contentful pixels; `ContainerTimingInfo.firstPaint` marks the first image or text Container Timing observed inside this container root. Only the `name` string is shared.
+`lastPaint` remains a `PerformancePaintTiming`: the most recent paint that actually **grew** the container's painted region. Together with the first contentful paint it brackets the interval over which the container was settling. It is now the only `PerformancePaintTiming` in the proposal and the only reason to ask Paint Timing for an enumeration member, which is the substance of [Decision 4](#decisions-to-take), where the lean is to drop it. Note also the asymmetry it creates: a fully contained paint can advance `largestContentfulPaint` without advancing `lastPaint`, so the cumulative largest's `renderTime` may be later than `lastPaint`.
 
 ### The nested paint attributes are non-nullable
 
@@ -311,7 +314,7 @@ Related, and equally needing explicit spec text: **Container Timing does not sto
 
 The nested objects are built when the paint happens, not when the query is made. There is a hard reason for that: `PerformanceEntry`'s identity includes the navigation it belongs to, so an object built on demand during a later soft navigation would carry the wrong one.
 
-Building eagerly has an observable consequence. When a container's cumulative largest has not changed, consecutive `getContainerTimingInfo()` calls hand back the **same** `LargestContentfulPaint` object (likewise `firstPaint`, which never changes for a container), so script can `===`-compare across calls to detect "the hero content did not change". The enclosing `ContainerTimingInfo` is a fresh object per call, since `size` and `intersectionRect` move.
+Building eagerly has an observable consequence. When a container's cumulative largest has not changed, consecutive `getContainerTimingInfo()` calls hand back the **same** `LargestContentfulPaint` object (likewise `firstContentfulPaint`, which never changes for a container and is the same object the entries carry), so script can `===`-compare across calls to detect "the hero content did not change". The enclosing `ContainerTimingInfo` is a fresh object per call, since `size` and `intersectionRect` move.
 
 This is presented as a consequence worth documenting, not as a contract this proposal asks to have specified. Requiring it normatively would constrain implementations that would rather build the nested objects at query time, for a convenience script can reproduce by comparing `renderTime` and `size`. Whether the spec should guarantee it, merely permit it, or say nothing is [decision 6](#decisions-to-take). What the spec does need to say either way is the related timing point: a nested object keeps the `paintTime` / `presentationTime` of the paint that made it the largest, so those legitimately differ from `lastPaint` and from the enclosing entry's. That is informative, since it tells you when the hero landed, possibly many frames earlier, but only if it is intentional.
 
@@ -506,11 +509,11 @@ The trade-off is between an entry that explains itself and an entry surface that
 
 *Lean: drop it.* What it costs is out of proportion to what it answers, and dropping it removes a whole class of open question rather than settling one.
 
-`firstPaint` reports `"first-paint"`, a name Paint Timing already enumerates. `lastPaint` is the only reason this proposal asks another specification to add an enumeration member, so removing it removes the cross-specification ask entirely, and with it the fallbacks (an empty `name` on both nested objects, or folding the last paint into `PaintTimingMixin` on `ContainerTimingInfo` itself). It also removes an ambiguity that [Decision 2](#decisions-to-take) would otherwise create: once entries can be queued by a growing largest as well as by a growing region, "last paint" has two defensible meanings, the last paint that grew the region and the last paint that produced an entry, and neither is obviously the one a caller wants. What remains is `{firstPaint, largestContentfulPaint, size, intersectionRect}`, which is also a cleaner fit for the shared aggregate mixin sketched under future considerations.
+With the first paint now expressed as a `LargestContentfulPaint`, `lastPaint` is the only `PerformancePaintTiming` left in the proposal, and therefore the only reason to ask another specification to add an enumeration member. Removing it removes the cross-specification ask entirely, and with it the fallbacks (an empty `name`, or folding the last paint into `PaintTimingMixin` on `ContainerTimingInfo` itself), and leaves the proposal nesting exactly one interface. It also removes an ambiguity that [Decision 2](#decisions-to-take) would otherwise create: once entries can be queued by a growing largest as well as by a growing region, "last paint" has two defensible meanings, the last paint that grew the region and the last paint that produced an entry, and neither is obviously the one a caller wants. What remains is `{firstPaint, largestContentfulPaint, size, intersectionRect}`, which is also a cleaner fit for the shared aggregate mixin sketched under future considerations.
 
 The cost is real but conditional on [Decision 1](#decisions-to-take). If `container` entries keep their timeline buffer, "when did this container last change" is answerable from the last entry's `startTime`, and `lastPaint` is a convenience for a question the entry stream already answers. If entries become observer-only, the aggregate is the only route to that question for a caller that was not listening, and `lastPaint` should stay. The two decisions should therefore be taken together, and in the order 1 then 4.
 
-Note what is not affected either way: `firstPaint` stays, because the first render time is genuinely unreachable once the early entries have aged out of the buffer, and because it is the replacement for the deprecated `firstRenderTime`.
+Note what is not affected either way: the first contentful paint stays, on the entry and on the aggregate, because it is the replacement for the deprecated `firstRenderTime` and because it is immutable, which is what lets it sit on a frozen entry at all.
 
 ### 5. Should a retired container root keep answering?
 
