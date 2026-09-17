@@ -161,7 +161,7 @@ partial interface Element {
 
 **The nested paint attributes are non-nullable because content is reported once.** An entry exists only because the painted region grew, so there is always newly painted content to nominate; a container has an aggregate view only once something painted in it. "Nothing yet" is `getContainerTimingInfo()` returning null, not null attributes inside a `ContainerTimingInfo`.
 
-**`"last-paint"` is a real ask on Paint Timing**, which enumerates two names and would have a third. It would never show on the timeline, since these objects are never queued, but it is another spec enumeration member. Fallbacks: an empty `name` on both nested objects.
+**`"last-paint"` is a real ask on Paint Timing**, which enumerates two names and would have a third. It would never show on the timeline, since these objects are never queued, but it is another spec enumeration member, and it is the only one this proposal asks for. Whether `lastPaint` earns that is [Decision 4](#decisions-to-take), where the lean is to drop the attribute.
 
 ## Key scenarios
 
@@ -275,7 +275,7 @@ One implementation consequence, worth carrying into any engine: **recording must
 
 `PerformancePaintTiming` is `PerformanceEntry` plus `PaintTimingMixin` and nothing else. Nesting one gives the container's first render its own `paintTime` / `presentationTime` split, which the bare `firstRenderTime` scalar, a presentation time only, cannot express.
 
-`lastPaint` is the most recent paint that actually **grew** the container's painted region. Together the two bracket the interval over which the container was still settling, so a caller can answer "has anything new been damaged in here since T?" without having received an entry.
+`lastPaint` is the most recent paint that actually **grew** the container's painted region. Together the two bracket the interval over which the container was still settling, so a caller can answer "has anything new been damaged in here since T?" without having received an entry. That is the case for keeping it; [Decision 4](#decisions-to-take) sets out the stronger case for dropping it, and this section describes the shape as currently implemented rather than as recommended.
 
 Note the asymmetry this creates with the cumulative largest: a fully-contained paint can advance `largestContentfulPaint` without advancing `lastPaint`, so the cumulative largest's `renderTime` may be **later** than `lastPaint`.
 
@@ -476,9 +476,15 @@ The trade-off is between an entry that explains itself and an entry surface that
 
 *Lean: yes, current behaviour.* Page LCP and ICP say no, and consistency is the argument for that. Against it: `largestContentfulPaint` is specified as monotonic over the container's lifetime, and retracting a candidate when its element goes away breaks that: a widget that swapped its main image for a smaller one would report the smaller one as its largest ever, and the answer would depend on when you ask, which is what the pull API is meant to stop mattering. LCP's reason does not transfer cleanly: LCP is a page-load metric describing a final loaded view, a container is explicitly a thing that keeps changing. The nested object survives either way; only its `element` goes null.
 
-### 4. Is `"last-paint"` acceptable to Paint Timing?
+### 4. Should `ContainerTimingInfo` keep `lastPaint` at all?
 
-*Lean: propose it, accept the fallback if the working group objects.* Fallbacks, in order: empty `name` on both nested objects; or drop `lastPaint` as an object and put the last paint on `ContainerTimingInfo` through `PaintTimingMixin`, losing the `firstPaint` / `lastPaint` symmetry but no information.
+*Lean: drop it.* What it costs is out of proportion to what it answers, and dropping it removes a whole class of open question rather than settling one.
+
+`firstPaint` reports `"first-paint"`, a name Paint Timing already enumerates. `lastPaint` is the only reason this proposal asks another specification to add an enumeration member, so removing it removes the cross-specification ask entirely, and with it the fallbacks (an empty `name` on both nested objects, or folding the last paint into `PaintTimingMixin` on `ContainerTimingInfo` itself). It also removes an ambiguity that [Decision 2](#decisions-to-take) would otherwise create: once entries can be queued by a growing largest as well as by a growing region, "last paint" has two defensible meanings, the last paint that grew the region and the last paint that produced an entry, and neither is obviously the one a caller wants. What remains is `{firstPaint, largestContentfulPaint, size, intersectionRect}`, which is also a cleaner fit for the shared aggregate mixin sketched under future considerations.
+
+The cost is real but conditional on [Decision 1](#decisions-to-take). If `container` entries keep their timeline buffer, "when did this container last change" is answerable from the last entry's `startTime`, and `lastPaint` is a convenience for a question the entry stream already answers. If entries become observer-only, the aggregate is the only route to that question for a caller that was not listening, and `lastPaint` should stay. The two decisions should therefore be taken together, and in the order 1 then 4.
+
+Note what is not affected either way: `firstPaint` stays, because the first render time is genuinely unreachable once the early entries have aged out of the buffer, and because it is the replacement for the deprecated `firstRenderTime`.
 
 ### 5. Should a retired container root keep answering?
 
