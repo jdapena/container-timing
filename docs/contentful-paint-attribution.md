@@ -300,7 +300,7 @@ The nested objects are built when the paint happens, not when the query is made.
 
 Building eagerly has an observable consequence. When a container's cumulative largest has not changed, consecutive `getContainerTimingInfo()` calls hand back the **same** `LargestContentfulPaint` object (likewise `firstPaint`, which never changes for a container), so script can `===`-compare across calls to detect "the hero content did not change". The enclosing `ContainerTimingInfo` is a fresh object per call, since `size` and `intersectionRect` move.
 
-This is presented as a consequence worth documenting, not as a contract this proposal asks to have specified. Requiring it normatively would constrain implementations that would rather build the nested objects at query time, for a convenience script can reproduce by comparing `renderTime` and `size`. Whether the spec should guarantee it, merely permit it, or say nothing is [decision 5](#decisions-to-take). What the spec does need to say either way is the related timing point: a nested object keeps the `paintTime` / `presentationTime` of the paint that made it the largest, so those legitimately differ from `lastPaint` and from the enclosing entry's. That is informative, since it tells you when the hero landed, possibly many frames earlier, but only if it is intentional.
+This is presented as a consequence worth documenting, not as a contract this proposal asks to have specified. Requiring it normatively would constrain implementations that would rather build the nested objects at query time, for a convenience script can reproduce by comparing `renderTime` and `size`. Whether the spec should guarantee it, merely permit it, or say nothing is [decision 6](#decisions-to-take). What the spec does need to say either way is the related timing point: a nested object keeps the `paintTime` / `presentationTime` of the paint that made it the largest, so those legitimately differ from `lastPaint` and from the enclosing entry's. That is informative, since it tells you when the hero landed, possibly many frames earlier, but only if it is intentional.
 
 ### The aggregate can be ahead of the last entry, never behind it
 
@@ -453,19 +453,35 @@ Container Timing is currently the odd one out among the paint-timing APIs. `cont
 
 Whichever is chosen, the interaction with the aggregate should be stated: entries and `getContainerTimingInfo()` are two views of the same recording, the aggregate is never behind the last entry, and the aggregate keeps answering after the entries for those paints have aged out of the buffer.
 
-### 2. Does content whose element was removed still count as the cumulative largest?
+### 2. Should an entry also be queued when the container's largest contentful paint grows?
+
+Today a `container` entry is queued when the accumulated painted region grows, and only then. That misses the case this API most wants to report: the real content arriving over its own placeholder. An image that paints entirely inside the region the placeholder already covered adds nothing to `size`, queues nothing, and yet is the most significant thing that has happened to the container. The proposal is to widen the trigger to *the painted region grew, or the container's cumulative largest contentful paint grew*.
+
+The second half has to mean **the cumulative largest increased**, not "a contentful paint happened". Content reaches Container Timing once per thing it paints, so the second reading would queue an entry per contentful element, which in a large widget is hundreds. The first reading is monotonic and bounded, typically a handful of extra entries over a container's life, and it is exactly the trigger ICP already uses: a strictly larger candidate appeared. Adopting it makes the Container Timing trigger a superset of ICP's, so a container can never stay silent about a paint that ICP would have reported.
+
+*Lean: adopt it, as follow-up work rather than as part of this change.* It is not additive: entry counts change for pages already using the API, so it belongs after the origin trial rather than inside it, and after the attribute changes above have landed.
+
+**The problem it creates, which needs an answer before it lands.** An entry queued because the largest grew, with no growth in the painted region, carries a `size` and an `intersectionRect` identical to the previous entry for that container. Nothing on the entry says why it was queued. A consumer that treats "new entry" as "the container got bigger", or that deduplicates on `size`, sees what looks like a repeat. The options, none of them obviously right:
+
+- **Say nothing, and let consumers compare.** An entry whose `size` matches the previous one for the same root was queued because the hero changed. This is inferable but only if you kept the previous entry, which an observer callback receiving a batch does not necessarily have.
+- **Add a reason to the entry**, an enumerated attribute naming what triggered it. Honest and self-describing, but it is a new attribute on an entry this proposal otherwise leaves alone, and no other paint-timing entry carries one.
+- **Keep the triggers but make the second one visible through the existing fields.** For instance, an entry queued only by a growing largest could report `largestNewContentfulPaint` with the container's `size` unchanged, which is what already happens, and the spec could simply state that this combination is meaningful rather than anomalous.
+
+The trade-off is between an entry that explains itself and an entry surface that stays frozen for the trial. This should be settled in the issue rather than in the implementation.
+
+### 3. Does content whose element was removed still count as the cumulative largest?
 
 *Lean: yes, current behaviour.* Page LCP and ICP say no, and consistency is the argument for that. Against it: `largestContentfulPaint` is specified as monotonic over the container's lifetime, and retracting a candidate when its element goes away breaks that: a widget that swapped its main image for a smaller one would report the smaller one as its largest ever, and the answer would depend on when you ask, which is what the pull API is meant to stop mattering. LCP's reason does not transfer cleanly: LCP is a page-load metric describing a final loaded view, a container is explicitly a thing that keeps changing. The nested object survives either way; only its `element` goes null.
 
-### 3. Is `"last-paint"` acceptable to Paint Timing?
+### 4. Is `"last-paint"` acceptable to Paint Timing?
 
 *Lean: propose it, accept the fallback if the working group objects.* Fallbacks, in order: empty `name` on both nested objects; or drop `lastPaint` as an object and put the last paint on `ContainerTimingInfo` through `PaintTimingMixin`, losing the `firstPaint` / `lastPaint` symmetry but no information.
 
-### 4. Should a retired container root keep answering?
+### 5. Should a retired container root keep answering?
 
 *Lean: no, current behaviour.* A root that lost its `containertiming` attribute or changed identifier returns null. Keeping a retired record alive raises questions with no good answer: for how long, keyed on what, and what happens when the identifier is reused elsewhere. Full table, including the change-back case, in [A container root's history ends when it stops being a container root](#a-container-roots-history-ends-when-it-stops-being-a-container-root).
 
-### 5. Should object identity across calls be normative?
+### 6. Should object identity across calls be normative?
 
 *Lean: document, do not require.* Building nested objects at paint time is forced by navigation identity; identity across calls falls out of it. Requiring it constrains implementations that would rather build at query time, for something script can reproduce by comparing `renderTime` and `size`. Explicitly permitting it, so the difference is not a conformance bug either way, may be the middle.
 
