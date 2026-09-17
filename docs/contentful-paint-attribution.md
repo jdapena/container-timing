@@ -90,7 +90,7 @@ Three problems, all consequences of putting everything on a per-update entry:
 
 ## Motivating use cases
 
-- **Attributing a slow widget:** which element dominates it, which resource backed it, when that resource loaded, and when it rendered, without correlating against Resource Timing by hand.
+- **Attributing a slow widget:** which element dominates it and when it rendered, and for an image, which resource backed it and when that resource loaded, without correlating against Resource Timing by hand. Text candidates carry no resource, following LCP's convention of an empty `url` and a zero `loadTime`, so the resource half of the answer exists only where there is a resource to name.
 - **Comparing a container against page LCP or against an interaction's ICP:** requires the same `size` definition and a cumulative, not per-update, largest.
 - **Reading final numbers at teardown**, from an SPA that tore the widget out, with no observer alive for the widget's lifetime.
 - **Content that fills already-painted space:** an image landing over its own placeholder is the widget's real content and today produces no entry and no attribution.
