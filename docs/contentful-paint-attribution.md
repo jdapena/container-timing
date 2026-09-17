@@ -301,11 +301,15 @@ An entry is queued only when the region grew, which means content painted inside
 
 This holds because Container Timing defines its own contentful set; see below.
 
-### Container Timing's contentful set is not LCP's
+### Container Timing's contentful set is its own, and should be stated as such
 
-Reusing the `LargestContentfulPaint` *interface* will be read as importing LCP's *behaviour*. It does not. Paints that LCP declines to treat as candidates (viewport-covering images, low-entropy images, background images that fail LCP's "contentful background" test) do reach Container Timing, and Container Timing keeps reporting them. This is already true today and is deliberate.
+Reusing the `LargestContentfulPaint` *interface* will be read as importing LCP's *behaviour*. It does not, and the specification should say positively what the set is rather than leave it to be inferred from the interface: **the content Container Timing records is the content Element Timing records**, because both are driven by the same paint feed. That is a constraint worth writing down rather than an implementation detail, since if the two sets diverged, an image annotated with `elementtiming` inside a marked container could report to one and not the other.
 
-It is also load-bearing: it is part of why the nested attributes can be non-nullable.
+That places Container Timing between the two metrics it is most likely to be compared against.
+
+It is broader than LCP. Paints that LCP declines to treat as candidates, such as viewport-covering images, low-entropy images, and background images that fail LCP's contentful-background test, do reach Container Timing, and it keeps reporting them. This is already true today, it is deliberate, and it is load-bearing: it is part of why the nested attributes can be non-nullable.
+
+It is narrower than first contentful paint. FCP counts content Container Timing does not record at all, a non-blank canvas being the clearest case. Adopting FCP's candidate set is not proposed, and FCP's model is not reusable in any case: FCP is a document level milestone, a single flag for whether anything contentful has painted, which computes nothing per element. Container Timing needs a rectangle per paint to accumulate the region, an area per element to select the largest, and an identity per paint to attribute it. The overlap in the word "contentful" is the only thing the two share, which is exactly why the difference needs stating.
 
 Related, and equally needing explicit spec text: **Container Timing does not stop recording at first input or scroll.** Containers legitimately keep updating for the document's lifetime; that is the point of the API. "Same as LCP" is not a usable shorthand here, because the four consumers all differ: page LCP stops on first input unconditionally and permanently; ICP stops per soft-navigation context, and only once that context has painted; Element Timing never stops. Container Timing should be specified alongside Element Timing.
 
